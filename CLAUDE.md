@@ -27,7 +27,9 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - Firmware is dumb: it renders what the host sends. Do not add policy (sorting, thresholds, labels) to the firmware.
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
-- Session labels are derived from `cwd` basename; overrides go in `host/config.toml`, not in code.
+- Session labels are derived from `cwd` basename; overrides go in `host/config.local.toml`, not in code.
+- Hook forwarding is done by Windows' built-in `curl.exe`, not a Python script, because process startup dominates hook cost. Do not "simplify" the hook commands back to a script without re-measuring.
+- `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 
 ## Commands
 
@@ -35,13 +37,19 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 cd host
 uv sync
 uv run pytest
-uv run beacon-host --port COM5 --log-level DEBUG
+uv run beacon-host --dry-run -v      # print snapshots, no hardware needed
+uv run beacon-host --port COM4 -v    # drive the display
+
+curl.exe -s http://127.0.0.1:47391/health
+./scripts/install-task.ps1           # run at logon; -Uninstall to remove
 ```
 
 Firmware builds headlessly with the arduino-cli bundled inside the Arduino IDE install. Compile before handing firmware over; it catches real problems, such as `LINE_MAX` colliding with a POSIX macro from limits.h.
 
 ```powershell
-$cli = "$env:LOCALAPPDATA\Programs\Arduino IDEesourcespp\libackendesourcesrduino-cli.exe"
+$cli = "$env:LOCALAPPDATA\Programs\Arduino IDE
+esourcespp\libackend
+esourcesrduino-cli.exe"
 & $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
 & $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
 & $cli board list        # find the port if COM4 has moved

@@ -14,7 +14,29 @@ Hooks are short-lived processes with no shared memory. Something has to own the 
 
 - **Hook writes directly to serial.** Rejected. Multiple sessions would fight over the COM port, and no process would know the full picture.
 - **Hook appends to a spool file, a separate script polls it.** Workable but adds file locking and a second process anyway.
-- **Hook POSTs to a localhost HTTP daemon.** Chosen. One owner of the port, one owner of state, sub-millisecond hook cost. If the daemon is down the hook silently drops the event and exits 0.
+- **Hook POSTs to a localhost HTTP daemon.** Chosen. One owner of the port, one owner of state, a cheap hook. If the daemon is down the POST fails instantly and the hook is a no-op.
+
+### The forwarder is curl, not a script
+
+Hooks run synchronously and the busiest of them fires on every tool call in every session, so the forwarder's process startup is the cost that matters. Measured on this machine, posting one event:
+
+| Forwarder | Median | p90 |
+|-----------|--------|-----|
+| `curl.exe` from System32 | 15.6 ms | 28.1 ms |
+| Python, system interpreter | 99.1 ms | 107.0 ms |
+| Python, project venv | 121.9 ms | 134.7 ms |
+
+curl ships with Windows, so this also removes any dependence on which Python is on `PATH` and any need to activate a virtual environment from a hook. The hook command is a single unquoted line.
+
+`hooks/beacon_hook.py` remains as a portable fallback for machines without curl, and `hooks/capture_payloads.py` exists to record real payloads for fixtures.
+
+### The daemon composes the status line
+
+The statusline hook is also plain curl. It POSTs the payload to `/status` and the daemon returns the text to display in the response body, which curl prints. That keeps a second interpreter out of a path that runs on every status refresh.
+
+The reply is composed purely from the payload just received, so the HTTP handler needs no shared state and no locking. The one external fact it uses is whether the device is currently connected, which appears as a `beacon` or `beacon?` marker at the end of the line. That makes a dead daemon or an unplugged display visible in the terminal without looking at the device.
+
+`/event` replies `204` with an empty body, deliberately. Claude Code feeds some hooks' stdout back into the session as context, so the forwarder must print nothing.
 
 ## Session state machine
 
@@ -65,18 +87,21 @@ Additional per-session info:
 
 ```
 beacon_host/
-  main.py          CLI entry: parse args/config, start HTTP server + main loop
-  hook_server.py   HTTP server on 127.0.0.1:47391, POST /event, POST /status
-  state.py         SessionStore: apply_event(), tick(), snapshot()
-  serial_link.py   Opens COM port, writes snapshot lines, reconnects on loss
-  config.py        TOML config: port, label overrides, thresholds
+  main.py          CLI entry: config, logging, signals, the main loop
+  hook_server.py   HTTP on 127.0.0.1:47391: POST /event, POST /status, GET /health
+  state.py         SessionStore: apply_event(), apply_status(), tick(), snapshot()
+  statusline.py    Composes the text returned to the statusline hook
+  serial_link.py   Opens the COM port, writes snapshots, reconnects on loss
+  config.py        TOML config: port, label overrides, thresholds, logging
 ```
 
 Threading model: the HTTP server thread pushes events onto a queue. The main loop drains the queue, updates state, ticks staleness, and writes one line to serial if the snapshot changed or one second has passed (so the elapsed timers advance). Serial writes stay single-threaded.
 
 Device discovery: `--port COMx` explicit, else auto-detect by USB VID/PID of the Nano ESP32 (VID 0x2341, PID 0x0070) via pyserial's port listing.
 
-Daemon lifecycle on Windows: run at login via a Task Scheduler entry or a Startup-folder shortcut (`pythonw` so no console window). A tray icon is a possible later addition, not phase 1.
+Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
+
+Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected. A tray icon is a possible later addition, not phase 1.
 
 ## Firmware internals
 

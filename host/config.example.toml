@@ -1,8 +1,25 @@
-# Copy to config.local.toml (gitignored). Not yet read by the daemon; CLI flags only in Phase 1.
+# Copy to config.local.toml, which is gitignored and read automatically.
+# Every value here is optional; these are the defaults.
 
-port = "COM4"          # omit to auto-detect by VID/PID
-stale_after_s = 300
-ended_grace_s = 30
+# COM port. Omit entirely to auto-detect the Nano ESP32 by USB VID/PID, which
+# survives the cable moving to a different physical port.
+port = "COM4"
 
+http_port = 47391      # must match the URL in the Claude Code hook commands
+stale_after_s = 300    # a busy session with no events for this long goes stale
+ended_grace_s = 30     # how long a closed session stays on screen
+max_rows = 6           # rows the display can show; the host sorts and truncates
+
+# log_file = "C:/Users/you/AppData/Local/session-beacon/beacon-host.log"
+log_level = "INFO"
+
+# Rows are labelled with the last path segment of the session's directory.
+# Override where that is too long or ambiguous. Keys accept either separator.
+#
+# Use TOML *literal* strings, the single-quoted kind, for backslash paths.
+# A lone backslash inside a double-quoted TOML string is a parse error:
+#   'C:\Repos\thing' = "thg"     correct
+#   "C:\Repos\thing" = "thg"     fails to parse
 [labels]
 "C:/Repos/factory-dynamics-research" = "fd-research"
+"C:/Repos/figures-repo-2026-04-26-tropical-algebra" = "tropical-alg"

@@ -26,7 +26,7 @@ flowchart LR
         cc1["Claude Code\n(VS Code #1)"]
         cc2["Claude Code\n(VS Code #2)"]
         cc3["Claude Code\n(terminal)"]
-        hook["beacon-hook\n(runs on every hook event)"]
+        hook["curl\n(one call per hook event)"]
         daemon["beacon-host\n(Python daemon)"]
         cc1 & cc2 & cc3 -->|"hooks + statusline"| hook
         hook -->|"HTTP POST\nlocalhost:47391"| daemon
@@ -39,7 +39,7 @@ flowchart LR
     daemon -->|"USB serial\nnewline JSON"| fw
 ```
 
-1. **Claude Code hooks** fire on session lifecycle events (start, prompt submitted, tool use, notification, stop, end). A tiny hook script forwards each event to the daemon.
+1. **Claude Code hooks** fire on session lifecycle events. Each one is a single `curl` call to the daemon, which measured about eight times cheaper than starting a Python interpreter per event.
 2. **beacon-host** keeps a per-session state machine (working / needs input / idle / ended), enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
 3. **Firmware** is deliberately dumb: it parses the snapshot and draws it. All policy lives on the host so it can change without reflashing.
 
@@ -60,7 +60,8 @@ firmware/beacon/          Arduino sketch for the Nano ESP32 (Arduino IDE, Adafru
 firmware/tft_smoketest/   Standalone wiring/display test, flash this first
 host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
-hooks/                    Hook forwarder script + example Claude Code settings snippet
+hooks/                    Example Claude Code settings, plus a payload capture tool
+scripts/                  install-task.ps1, registers the daemon to run at logon
 docs/                     Architecture, hardware, protocol, integration, roadmap
 ```
 
@@ -70,10 +71,20 @@ docs/                     Architecture, hardware, protocol, integration, roadmap
 
 ```powershell
 # 0. Wire the display per docs/hardware.md, then flash firmware/tft_smoketest to check it
-# 1. Flash firmware/beacon/beacon.ino from the Arduino IDE (board: Arduino Nano ESP32)
-# 2. Install and run the host
-cd host
-uv sync
-uv run beacon-host --port COM4
-# 3. Merge hooks/settings.example.json into ~/.claude/settings.json
+
+# 1. Flash the firmware
+$cli = "$env:LOCALAPPDATA\Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe"
+& $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
+& $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
+
+# 2. Run the host
+cd host; uv sync
+uv run beacon-host --dry-run -v      # sanity check without the board
+uv run beacon-host                   # auto-detects the board by USB id
+
+# 3. Merge hooks/settings.example.json into ~/.claude/settings.json, then
+#    restart your Claude Code sessions so the hooks take effect.
+
+# 4. Optional: start it automatically at logon
+./scripts/install-task.ps1
 ```

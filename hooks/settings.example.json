@@ -1,18 +1,21 @@
 {
-  "_comment": "Merge into ~/.claude/settings.json. Adjust the python path if 'python' on PATH is the Store stub. PreToolUse is deliberately absent: PostToolUse alone is enough for activity and staleness, and halves the per-tool-call hook cost.",
+  "_comment": "Merge into ~/.claude/settings.json. Uses Windows' built-in curl, which measured ~15 ms per call against ~100-120 ms for a Python forwarder. No quoting needed and no dependency on which Python is on PATH. If beacon-host is not running, curl fails instantly and the hook is a no-op. PreToolUse is deliberately absent: PostToolUse alone covers activity and staleness at half the cost on the busiest event.",
+
   "hooks": {
-    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "PermissionDenied":  [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "Notification":      [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "Stop":              [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }]
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "PermissionDenied":  [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "Notification":      [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }]
   },
+
+  "_statusline_comment": "Optional. The daemon composes the text and returns it in the response body, which curl prints. Omit this block if you already have a status line you like; the beacon works without it, but then it has no source of cost or context data.",
   "statusLine": {
     "type": "command",
-    "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py --statusline"
+    "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/status"
   }
 }

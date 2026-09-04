@@ -1,4 +1,10 @@
-"""USB serial link to the beacon device. Handles discovery and reconnect."""
+"""USB serial link to the beacon device. Handles discovery and reconnect.
+
+The device disappears and comes back on every reflash, and Windows can move
+the COM number if the cable changes port, so this never assumes the link is
+up. Every send is best-effort and a failure just closes the port for the next
+reconnect attempt.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +26,7 @@ RECONNECT_S = 2.0
 
 
 def find_port() -> str | None:
+    """First Nano ESP32 by USB VID/PID, so a moved cable does not need config."""
     for p in list_ports.comports():
         if p.vid == NANO_ESP32_VID and p.pid == NANO_ESP32_PID:
             return p.device
@@ -31,47 +38,65 @@ class SerialLink:
         self._port = port
         self._ser: serial.Serial | None = None
         self._next_try = 0.0
+        self._warned = False
+
+    @property
+    def connected(self) -> bool:
+        return bool(self._ser and self._ser.is_open)
 
     def ensure_open(self) -> bool:
-        if self._ser and self._ser.is_open:
+        if self.connected:
             return True
         now = time.monotonic()
         if now < self._next_try:
             return False
         self._next_try = now + RECONNECT_S
+
         port = self._port or find_port()
         if not port:
+            if not self._warned:
+                log.warning("no beacon device found; will keep looking")
+                self._warned = True
             return False
         try:
             self._ser = serial.Serial(port, BAUD, timeout=0, write_timeout=1)
-            log.info("opened %s", port)
-            self.send({"t": "hello", "v": 1, "host": socket.gethostname()})
-            return True
         except serial.SerialException as e:
-            log.warning("open %s failed: %s", port, e)
+            if not self._warned:
+                # Usually the Arduino IDE serial monitor holding the port.
+                log.warning("cannot open %s (%s); will keep retrying", port, e)
+                self._warned = True
             self._ser = None
             return False
 
-    def send(self, msg: dict[str, Any]) -> None:
+        log.info("connected to beacon on %s", port)
+        self._warned = False
+        self.send({"t": "hello", "v": 1, "host": socket.gethostname()})
+        return True
+
+    def send(self, msg: dict[str, Any]) -> bool:
         if not self.ensure_open():
-            return
+            return False
         line = json.dumps(msg, separators=(",", ":")) + "\n"
         try:
             self._ser.write(line.encode())  # type: ignore[union-attr]
-        except serial.SerialException as e:
-            log.warning("write failed, closing: %s", e)
+            return True
+        except (serial.SerialException, OSError) as e:
+            log.warning("write failed, dropping link: %s", e)
             self.close()
+            return False
 
     def read_lines(self) -> list[str]:
-        """Drain any device-to-host lines (heartbeats). Non-blocking."""
-        if not (self._ser and self._ser.is_open):
+        """Drain device-to-host lines such as heartbeats. Non-blocking."""
+        if not self.connected:
             return []
         try:
-            data = self._ser.read(4096)
-        except serial.SerialException:
+            data = self._ser.read(4096)  # type: ignore[union-attr]
+        except (serial.SerialException, OSError):
             self.close()
             return []
-        return [ln for ln in data.decode(errors="replace").split("\n") if ln.strip()]
+        if not data:
+            return []
+        return [ln for ln in data.decode(errors="replace").splitlines() if ln.strip()]
 
     def close(self) -> None:
         if self._ser:
