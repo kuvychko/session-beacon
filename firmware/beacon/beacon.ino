@@ -80,6 +80,21 @@ static constexpr uint8_t LABEL_MAX  = 16;   // 16 * 6 = 96 px
 static constexpr int16_t AGE_RIGHT  = 157;  // 4-char age starts at 133
 static constexpr int16_t TEXT_DY    = 4;    // centres an 8 px glyph in a 16 px row
 
+// Every varying field is a FIXED WIDTH, drawn at a FIXED x, with opaque text.
+// Adafruit_GFX fills the whole 6x8 cell when a background colour is given, so
+// each glyph erases what it replaces. Nothing is cleared to background first,
+// which is what removes the flash on every update. Right-aligned values are
+// space-padded into their field rather than moved, so the start never shifts.
+static constexpr uint8_t AGE_W    = 4;
+static constexpr int16_t AGE_X    = AGE_RIGHT - 6 * AGE_W;   // 133
+static constexpr uint8_t COST_W   = 8;
+static constexpr int16_t COST_X   = W - 4 - 6 * COST_W;      // 108
+static constexpr int16_t COUNT_X  = 52;                      // "%2u active", 9 chars
+static constexpr uint8_t MODEL_W  = 8;
+static constexpr int16_t MODEL_X  = W - 4 - 6 * MODEL_W;     // 108
+static constexpr int16_t BAR_X    = 56;
+static constexpr int16_t BAR_W    = 44;
+
 // ---- Colours (RGB565) ----
 #define C_BG      ST77XX_BLACK
 #define C_HEADER  0x000F   // dark blue
@@ -121,9 +136,13 @@ Snapshot snap;
 struct RowView {
   bool used = false;
   char label[LABEL_MAX + 1] = "";
-  char state[6] = "";
-  char age[6] = "";
-  bool lit = true;      // blink phase this row was drawn in
+  char age[AGE_W + 1] = "";
+  // Colours rather than the state name: they are what actually gets drawn, and
+  // they already encode both the state and the blink phase.
+  uint16_t bg = 0;
+  uint16_t labelFg = 0;
+  uint16_t ageFg = 0;
+  uint16_t dot = 0;
 };
 
 struct HeaderView {
@@ -181,21 +200,20 @@ static inline bool elapsed(uint32_t now, uint32_t since, uint32_t ms) {
   return (int32_t)(now - since) >= (int32_t)ms;
 }
 
+// Right-aligned inside a fixed-width field, so "9s" and "10s" occupy the same
+// cells and the shorter one blanks the cell the longer one used.
 static void fmtAge(uint32_t s, char* out, size_t n) {
-  if (s < 60)        snprintf(out, n, "%lus", (unsigned long)s);
-  else if (s < 3600) snprintf(out, n, "%lum", (unsigned long)(s / 60));
-  else               snprintf(out, n, "%luh", (unsigned long)(s / 3600));
+  char tmp[12];
+  if (s < 60)        snprintf(tmp, sizeof tmp, "%lus", (unsigned long)s);
+  else if (s < 3600) snprintf(tmp, sizeof tmp, "%lum", (unsigned long)(s / 60));
+  else               snprintf(tmp, sizeof tmp, "%luh", (unsigned long)(s / 3600));
+  snprintf(out, n, "%*s", (int)AGE_W, tmp);
 }
 
 static void copyStr(char* dst, size_t n, const char* src) {
   if (!src) { dst[0] = 0; return; }
   strncpy(dst, src, n - 1);
   dst[n - 1] = 0;
-}
-
-static void printRight(int16_t rightX, int16_t y, const char* s) {
-  tft.setCursor(rightX - 6 * (int16_t)strlen(s), y);
-  tft.print(s);
 }
 
 static void invalidateAll() {
@@ -259,23 +277,35 @@ static void drawVersionError(int got) {
 }
 
 static void drawHeader() {
-  char cost[10] = "";
-  if (snap.cost >= 0) snprintf(cost, sizeof cost, "$%.2f", snap.cost);
+  char cost[COST_W + 1];
+  if (snap.cost >= 0) {
+    char tmp[16];
+    snprintf(tmp, sizeof tmp, "$%.2f", snap.cost);
+    snprintf(cost, sizeof cost, "%*s", (int)COST_W, tmp);
+  } else {
+    snprintf(cost, sizeof cost, "%*s", (int)COST_W, "");
+  }
 
-  if (shownHeader.valid && shownHeader.n == snap.n && !strcmp(shownHeader.cost, cost)) return;
+  const bool fresh = !shownHeader.valid;
+  if (!fresh && shownHeader.n == snap.n && !strcmp(shownHeader.cost, cost)) return;
 
-  tft.fillRect(0, 0, W, HEADER_H, C_HEADER);
   tft.setTextSize(1);
-  tft.setTextColor(C_TEXT);
-  tft.setCursor(4, TEXT_DY);
-  tft.print("BEACON");
-
-  char act[16];
-  snprintf(act, sizeof act, "%u active", snap.n);
-  tft.setCursor(58, TEXT_DY);
-  tft.print(act);
-
-  if (cost[0]) printRight(W - 4, TEXT_DY, cost);
+  tft.setTextColor(C_TEXT, C_HEADER);
+  if (fresh) {
+    tft.fillRect(0, 0, W, HEADER_H, C_HEADER);
+    tft.setCursor(4, TEXT_DY);
+    tft.print("BEACON");
+  }
+  if (fresh || shownHeader.n != snap.n) {
+    char act[16];
+    snprintf(act, sizeof act, "%2u active", snap.n);
+    tft.setCursor(COUNT_X, TEXT_DY);
+    tft.print(act);
+  }
+  if (fresh || strcmp(shownHeader.cost, cost)) {
+    tft.setCursor(COST_X, TEXT_DY);
+    tft.print(cost);
+  }
 
   shownHeader.valid = true;
   shownHeader.n = snap.n;
@@ -285,22 +315,15 @@ static void drawHeader() {
 // A row that needs attention is filled edge to edge and alternates between
 // red-on-black and black-on-red. Both phases stay readable, so it reads as a
 // pulse rather than as text flashing in and out.
+//
+// Everything else redraws only the fields that changed, in place, over an
+// opaque background. The row is cleared only when its background colour
+// actually changes, which for a steady session is never.
 static void drawRow(uint8_t i) {
   const Session& s = snap.s[i];
-  bool need = isNeed(s.state);
+  const bool need = isNeed(s.state);
 
-  char age[6];
-  fmtAge(s.age, age, sizeof age);
-
-  RowView& v = shownRows[i];
-  if (v.used && !strcmp(v.label, s.label) && !strcmp(v.state, s.state) &&
-      !strcmp(v.age, age) && (!need || v.lit == blinkOn)) {
-    return;
-  }
-
-  int16_t y = ROWS_Y + i * ROW_H;
   uint16_t bg = C_BG, labelFg = C_TEXT, ageFg = C_MUTED, dot = stateColor(s.state);
-
   if (need) {
     if (blinkOn) { bg = C_NEED; labelFg = ageFg = dot = ST77XX_BLACK; }
     else         { bg = C_BG;   labelFg = ageFg = dot = C_NEED; }
@@ -312,22 +335,33 @@ static void drawRow(uint8_t i) {
     labelFg = C_MUTED;
   }
 
-  tft.fillRect(0, y, W, ROW_H, bg);
-  tft.fillCircle(DOT_CX, y + ROW_H / 2, DOT_R, dot);
+  char label[LABEL_MAX + 1], age[AGE_W + 1];
+  snprintf(label, sizeof label, "%-*s", (int)LABEL_MAX, s.label);
+  fmtAge(s.age, age, sizeof age);
+
+  RowView& v = shownRows[i];
+  const bool fresh = !v.used || v.bg != bg;
+  const int16_t y = ROWS_Y + i * ROW_H;
+
+  if (fresh) tft.fillRect(0, y, W, ROW_H, bg);
+  if (fresh || v.dot != dot) tft.fillCircle(DOT_CX, y + ROW_H / 2, DOT_R, dot);
 
   tft.setTextSize(1);
-  tft.setTextColor(labelFg);
-  tft.setCursor(LABEL_X, y + TEXT_DY);
-  tft.print(s.label);
-
-  tft.setTextColor(ageFg);
-  printRight(AGE_RIGHT, y + TEXT_DY, age);
+  if (fresh || v.labelFg != labelFg || strcmp(v.label, label)) {
+    tft.setTextColor(labelFg, bg);
+    tft.setCursor(LABEL_X, y + TEXT_DY);
+    tft.print(label);
+  }
+  if (fresh || v.ageFg != ageFg || strcmp(v.age, age)) {
+    tft.setTextColor(ageFg, bg);
+    tft.setCursor(AGE_X, y + TEXT_DY);
+    tft.print(age);
+  }
 
   v.used = true;
-  copyStr(v.label, sizeof v.label, s.label);
-  copyStr(v.state, sizeof v.state, s.state);
+  copyStr(v.label, sizeof v.label, label);
   copyStr(v.age, sizeof v.age, age);
-  v.lit = blinkOn;
+  v.bg = bg; v.labelFg = labelFg; v.ageFg = ageFg; v.dot = dot;
 }
 
 static void clearRow(uint8_t i) {
@@ -345,30 +379,47 @@ static void drawFooter() {
     ctx = snap.s[snap.sel].ctx;
     model = snap.s[snap.sel].model;
   }
-  if (shownFooter.valid && shownFooter.ctx == ctx && !strcmp(shownFooter.model, model)) return;
+  const bool fresh = !shownFooter.valid;
+  if (!fresh && shownFooter.ctx == ctx && !strcmp(shownFooter.model, model)) return;
 
-  tft.fillRect(0, FOOTER_Y, W, FOOTER_H, C_BG);
-  tft.drawFastHLine(0, FOOTER_Y, W, C_GRID);
+  const int16_t ty = FOOTER_Y + 5;
   tft.setTextSize(1);
+  tft.setTextColor(C_MUTED, C_BG);
 
-  int16_t ty = FOOTER_Y + 5;
-  if (ctx >= 0) {
+  if (fresh) {
+    tft.fillRect(0, FOOTER_Y, W, FOOTER_H, C_BG);
+    tft.drawFastHLine(0, FOOTER_Y, W, C_GRID);
+  }
+
+  if (fresh || shownFooter.ctx != ctx) {
     char buf[12];
-    snprintf(buf, sizeof buf, "ctx %d%%", ctx);
-    tft.setTextColor(C_MUTED);
+    // "ctx 100%" is 8 chars and ends at x=52, clear of the bar at 56.
+    if (ctx >= 0) snprintf(buf, sizeof buf, "ctx %3d%%", ctx);
+    else          snprintf(buf, sizeof buf, "%8s", "");
     tft.setCursor(4, ty);
     tft.print(buf);
 
-    // "ctx 100%" is 8 chars and ends at x=52, so the bar starts clear of it
-    // and still leaves room for an 8-char model name on the right.
-    const int16_t barX = 56, barW = 44;
-    tft.drawRect(barX, ty, barW, 7, C_GRID);
-    uint16_t fill = ctx > 85 ? C_NEED : (ctx > 65 ? C_STALE : C_IDLE);
-    tft.fillRect(barX + 1, ty + 1, (barW - 2) * ctx / 100, 5, fill);
+    if (ctx >= 0) {
+      tft.drawRect(BAR_X, ty, BAR_W, 7, C_GRID);
+      const int16_t inner = BAR_W - 2;
+      int16_t filled = inner * ctx / 100;
+      if (filled > inner) filled = inner;
+      const uint16_t fill = ctx > 85 ? C_NEED : (ctx > 65 ? C_STALE : C_IDLE);
+      // Repaint both halves of the bar rather than clearing it, so it slides
+      // instead of blinking.
+      if (filled > 0) tft.fillRect(BAR_X + 1, ty + 1, filled, 5, fill);
+      if (filled < inner)
+        tft.fillRect(BAR_X + 1 + filled, ty + 1, inner - filled, 5, C_BG);
+    } else {
+      tft.fillRect(BAR_X, ty, BAR_W, 7, C_BG);
+    }
   }
-  if (model[0]) {
-    tft.setTextColor(C_MUTED);
-    printRight(W - 4, ty, model);
+
+  if (fresh || strcmp(shownFooter.model, model)) {
+    char m[MODEL_W + 1];
+    snprintf(m, sizeof m, "%*s", (int)MODEL_W, model);
+    tft.setCursor(MODEL_X, ty);
+    tft.print(m);
   }
 
   shownFooter.valid = true;

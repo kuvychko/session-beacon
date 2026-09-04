@@ -107,7 +107,14 @@ Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Ta
 
 - Single sketch, Arduino IDE, same libraries as `env_monitoring` (Adafruit_GFX, Adafruit_ST7735) plus ArduinoJson.
 - `Serial` (USB CDC) at 115200. Reads until newline, parses with a fixed-size ArduinoJson document (2 KB is plenty for 6 sessions).
-- Repaints only changed regions, tracking what the header, each row, and the footer currently show. Measured on this panel over software SPI, a full-screen repaint costs about 900 ms and a two-row update about 100 ms. Since the host resends a snapshot every second purely to advance timers, repainting everything would leave the device permanently mid-sweep, so this is not a premature optimisation. Hardware SPI would cut both figures by roughly an order of magnitude and needs no rewiring, but the partial-update path is already fast enough that it has not been worth the risk of changing.
+- Repaints only changed *fields*, tracking what the header, each row, and the footer currently show. Measured on this panel over software SPI, a full-screen repaint costs about 900 ms, a full two-row repaint about 100 ms, and a field-level update of one row about 28 ms. Since the host resends a snapshot every second purely to advance timers, repainting everything would leave the device permanently mid-sweep, so this is not a premature optimisation. Hardware SPI would cut both figures by roughly an order of magnitude and needs no rewiring, but the partial-update path is already fast enough that it has not been worth the risk of changing.
+- **Nothing is cleared to background before being drawn.** Every varying field is a
+  fixed width at a fixed x, drawn with an opaque text background so each glyph erases
+  the cell it replaces. Right-aligned values are space-padded into their field rather
+  than repositioned, so a value going from `9s` to `10s` does not move. Clearing a row
+  first and then drawing over it produced a visible flash once a second, because the
+  row sat blank for the tens of milliseconds software SPI needs. A row is cleared only
+  when its background colour genuinely changes, which for a steady session is never.
 - **All timer comparisons go through `elapsed(now, since, ms)`, which uses a signed difference.** See the timing note below; a plain unsigned `now - then` caused a real and confusing bug.
 - Shows a "no host" screen if nothing arrives for 10 s, so an unplugged or dead daemon is obvious.
 - Shows a "no sessions" screen when the host is connected but reports nothing. These two failures have completely different causes and used to look identical: an empty screen. In practice "no sessions" means the Claude Code hooks were never installed, so the notice says so.
