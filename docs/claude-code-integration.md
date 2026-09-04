@@ -2,7 +2,7 @@
 
 Everything the beacon knows comes from two Claude Code features: **hooks** and the **statusline command**. Both are configured in `~/.claude/settings.json` and apply to every session on the machine, which is exactly what we want.
 
-Field names below are taken from the published hook and statusline schemas, not from memory. Reference: [hooks](https://code.claude.com/docs/en/hooks), [statusline](https://code.claude.com/docs/en/statusline). They have not yet been confirmed against a payload captured on this machine; see the first-run checklist at the end.
+Field names below have been checked against payloads captured on this machine, not just against the published schemas, and the two disagree. Reference: [hooks](https://code.claude.com/docs/en/hooks), [statusline](https://code.claude.com/docs/en/statusline).
 
 ## Fields every hook receives
 
@@ -24,7 +24,7 @@ Two of these are more useful than they first look:
 - **`permission_mode`** says whether a session can block on you at all. One running in `bypassPermissions` will never raise a permission prompt, so a long silence there means something different than it does elsewhere. Captured now, displayed later.
 - **`agent_id` and `agent_type`** are present only inside subagents. Subagent activity is therefore distinguishable from the parent's, which contradicts an earlier note in this file claiming it was not.
 
-There is no `source` field. `SessionStart` carries `session_start_reason` and `SessionEnd` carries `session_end_reason`.
+`SessionStart` carries `source`, with the value `startup` observed. `SessionEnd` carries `reason`, with `other` observed. Both differ from the published schema; see the verification section below.
 
 ## Hook events we register
 
@@ -88,18 +88,67 @@ Windows notes:
 
 ## Session identity and labels
 
-`session_id` is unique per session, including resumes. The label is the basename of `cwd` by default, capped at 16 characters. Override in `host/config.toml`:
+`session_id` is unique per session, including resumes. The label is the name of the git repository enclosing `cwd`, capped at 16 characters, not the `cwd` basename. `cwd` moves as a session works, so labelling from it directly showed this repo as `host` whenever anything ran in `host/`. Override in `host/config.toml`, keyed by repo root or exact directory:
 
 ```toml
 [labels]
 "C:/Repos/factory-dynamics-research" = "fd-research"
 ```
 
-## First-run checklist
+## How much of this is verified
 
-The schema above is documented, not observed. Before trusting it on this machine:
+Three different levels, and the difference matters.
 
-1. Point the `Notification` and `PermissionRequest` hooks at a script that appends raw stdin to a file. Trigger a permission prompt in a scratch session. Confirm the event names and `notification_type` values that actually arrive.
-2. Do the same for the statusline command. Confirm the context window fields are populated and watch what happens right after a `/compact`.
-3. Measure hook latency with `Measure-Command` against the real interpreter path.
-4. Save the captured payloads as fixtures under `host/tests/fixtures/` and point the state machine tests at them, replacing the hand-written dictionaries they use today.
+**Observed on this machine**, captured by running the daemon with `--capture` against
+Claude Code 2.1.261 and saved to `host/tests/fixtures/hook_payloads.jsonl`:
+`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`.
+
+**Present in the CLI binary but not yet seen firing**: `PermissionRequest`,
+`PermissionDenied`, `StopFailure`, `PostToolUseFailure`, `SubagentStop`, and the
+`notification_type` values `permission_prompt`, `idle_prompt` and `agent_needs_input`.
+These are the events that drive the attention state, so they are the ones still worth
+confirming. Triggering them needs an interactive permission prompt, which a headless
+run cannot produce.
+
+**Contradicted by observation**: the published schema this project was first built
+against does not match this build. The corrections are below.
+
+### Where the published schema was wrong
+
+| Published | Actually sent | Used by the beacon |
+|-----------|---------------|--------------------|
+| `session_start_reason` | `source` | no |
+| `session_end_reason` | `reason` | no |
+| `user_prompt` | `prompt` | no |
+| `tool_output` | `tool_response` | no |
+
+None of these are fields the state machine reads, so nothing behaved incorrectly, but
+anyone extending this from the documentation alone would have written code against
+names that do not exist. `session_start_reason` does not appear anywhere in the CLI
+binary, so the published page describes a different version rather than being simply
+mistaken.
+
+Fields observed that the published schema did not mention: `prompt_id`,
+`effort.level`, `duration_ms` and `scratchpad_dir` on tool events, and
+`stop_hook_active`, `background_tasks` and `session_crons` on `Stop`.
+
+### Capturing more
+
+The daemon records payloads itself, which is better than a second hook: no extra
+process per event, and it records exactly what the state machine sees.
+
+```powershell
+uv run beacon-host --capture "$env:TEMP/beacon-payloads.jsonl"
+```
+
+Conversation content is stripped as it is written. Prompts, tool arguments, tool
+responses and assistant messages become markers like `<str len=22>`, and every path
+except `cwd` is reduced to its last segment because the others carry a username.
+Field names and shapes survive, which is all a fixture needs. A test asserts the
+committed fixtures contain no usernames or unredacted text.
+
+## Still to confirm
+
+1. Trigger a real permission prompt with the daemon capturing, to confirm whether attention arrives as a `PermissionRequest` event, a `Notification` carrying `notification_type`, or both. The state machine handles all three paths, so it should work either way, but that is reasoning rather than evidence.
+2. Capture a statusline payload. The cost and context fields are still schema-derived, and `context_window.used_percentage` is documented as null early in a session and after a `/compact`, which is worth watching for directly.
+3. Watch a `StopFailure` land, most easily during a rate limit.

@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from . import hook_server
+from .capture import Capture
 from .config import Config, default_config_path
 from .serial_link import SerialLink
 from .state import SessionStore
@@ -38,6 +39,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--http-port", type=int)
     ap.add_argument("--stale-after", type=float, help="seconds before a busy session goes stale")
     ap.add_argument("--log-file")
+    ap.add_argument("--capture", metavar="FILE",
+                    help="append redacted hook payloads to FILE as JSONL, "
+                         "for building test fixtures")
     ap.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     ap.add_argument("--dry-run", action="store_true", help="print snapshots instead of using serial")
     return ap.parse_args(argv)
@@ -84,7 +88,7 @@ def setup_logging(cfg: Config) -> None:
         logging.getLogger("beacon_host").warning(problem)
 
 
-def run(cfg: Config, dry_run: bool = False) -> int:
+def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> int:
     stopping = False
 
     def stop(signum, _frame):
@@ -117,6 +121,10 @@ def run(cfg: Config, dry_run: bool = False) -> int:
     link = None if dry_run else SerialLink(cfg.port)
     hook_server.set_device_ok(bool(dry_run))
 
+    capture = Capture(capture_path) if capture_path else None
+    if capture:
+        log.info("capturing redacted payloads to %s", capture.path)
+
     last_key: str | None = None
     last_push = 0.0
     events_received = 0
@@ -132,6 +140,8 @@ def run(cfg: Config, dry_run: bool = False) -> int:
                     kind, payload = q.get_nowait()
                 except queue.Empty:
                     break
+                if capture:
+                    capture.write(kind, payload)
                 if kind == "event":
                     log.debug("event %s %s", payload.get("hook_event_name"),
                               payload.get("session_id", "")[:8])
@@ -191,7 +201,7 @@ def main() -> None:
     args = parse_args()
     cfg = build_config(args)
     setup_logging(cfg)
-    sys.exit(run(cfg, dry_run=args.dry_run))
+    sys.exit(run(cfg, dry_run=args.dry_run, capture_path=args.capture))
 
 
 if __name__ == "__main__":

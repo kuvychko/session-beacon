@@ -10,7 +10,7 @@ Docs, repo layout, protocol, skeletons. This is where the repo stands now.
 
 Goal: the screen shows real session states from real Claude Code sessions.
 
-1. ~~Confirm hook payload shapes.~~ **Partly done.** Reconciled against the published hook and statusline schemas: `PermissionRequest`, `PermissionDenied`, and `StopFailure` are now used, `PreToolUse` dropped, and several field names corrected. Still to do: capture payloads on this machine and save them as fixtures. See [claude-code-integration.md](claude-code-integration.md).
+1. ~~Confirm hook payload shapes.~~ **Done.** Real payloads captured on this machine and committed as fixtures, with the tests replaying an actual session lifecycle. Capturing found four field names where the published schema disagrees with what this build sends. The attention events remain unobserved because they need an interactive permission prompt. See [claude-code-integration.md](claude-code-integration.md).
 2. ~~Wire the display and flash `firmware/tft_smoketest/tft_smoketest.ino`.~~ **Done.** Wiring, offsets, rotation, and text metrics all check out. The panel turned out to be BGR-wired and needed a colour-order register fix, now applied in both sketches. See [hardware.md](hardware.md#panel-colour-order).
 3. ~~Firmware: parse `snap`, draw header, rows, footer, "no host" screen.~~ **Done and verified on hardware** with the `demo` command.
 4. ~~Host: state machine, hook server, serial link.~~ **Done.** TOML config, rotating log, `/health`, Scheduled Task installer. Verified end to end against the board.
