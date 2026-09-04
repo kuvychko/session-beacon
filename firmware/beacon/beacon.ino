@@ -172,6 +172,7 @@ struct HeaderView {
 
 struct FooterView {
   bool valid = false;
+  bool hint = false;   // showing the "nothing feeds this" message
   int8_t ctx = -2;
   char model[9] = "";
 };
@@ -398,7 +399,14 @@ static void drawFooter() {
     ctx = snap.s[snap.sel].ctx;
     model = snap.s[snap.sel].model;
   }
-  const bool fresh = !shownFooter.valid;
+  // Cost and context reach the host only through the statusline hook, which is
+  // optional. Without it this strip was simply blank, which reads as a broken
+  // display rather than as a feature that was never switched on.
+  const bool hint = (ctx < 0 && !model[0]);
+
+  // Entering or leaving the hint repaints the whole strip; the two layouts
+  // share no fields, so drawing one over the other would leave fragments.
+  const bool fresh = !shownFooter.valid || shownFooter.hint != hint;
   if (!fresh && shownFooter.ctx == ctx && !strcmp(shownFooter.model, model)) return;
 
   const int16_t ty = FOOTER_Y + 5;
@@ -408,6 +416,17 @@ static void drawFooter() {
   if (fresh) {
     tft.fillRect(0, FOOTER_Y, W, FOOTER_H, C_BG);
     tft.drawFastHLine(0, FOOTER_Y, W, C_GRID);
+  }
+
+  if (hint) {
+    tft.setTextColor(C_GRID, C_BG);
+    tft.setCursor(4, ty);
+    tft.print("no statusline data");
+    shownFooter.valid = true;
+    shownFooter.hint = hint;
+    shownFooter.ctx = ctx;
+    copyStr(shownFooter.model, sizeof shownFooter.model, model);
+    return;
   }
 
   if (fresh || shownFooter.ctx != ctx) {
@@ -442,6 +461,7 @@ static void drawFooter() {
   }
 
   shownFooter.valid = true;
+  shownFooter.hint = hint;
   shownFooter.ctx = ctx;
   copyStr(shownFooter.model, sizeof shownFooter.model, model);
 }

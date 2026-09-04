@@ -128,6 +128,7 @@ Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Ta
   when its background colour genuinely changes, which for a steady session is never.
 - **All timer comparisons go through `elapsed(now, since, ms)`, which uses a signed difference.** See the timing note below; a plain unsigned `now - then` caused a real and confusing bug.
 - Shows a "no host" screen if nothing arrives for 10 s, so an unplugged or dead daemon is obvious.
+- Shows `no statusline data` in the footer when no cost or context has ever arrived. That data reaches the host only through the statusline hook, which is optional, so the strip was otherwise simply blank and read as a broken display rather than a feature that was never switched on.
 - Shows a "no sessions" screen when the host is connected but reports nothing. These two failures have completely different causes and used to look identical: an empty screen. In practice "no sessions" means the Claude Code hooks were never installed, so the notice says so.
 - Optional heartbeat back to host so the host can log device presence.
 - Accepts local commands on the same serial line so the layout can be exercised without a host. A line starting with `{` is a protocol message; anything else is a command, and `demo` loads a canned snapshot with running timers.

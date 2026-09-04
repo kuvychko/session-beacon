@@ -119,7 +119,7 @@ uv run beacon-host                   # auto-detects the board by USB id
 
 # 3. Install the Claude Code hooks, then RESTART your Claude Code sessions.
 #    Without this the daemon runs happily and reports zero sessions forever.
-./scripts/install-hooks.ps1              # -WithStatusLine for cost and context
+./scripts/install-hooks.ps1 -WithStatusLine   # omit the switch to keep your own status line
 curl.exe -s http://127.0.0.1:47391/health   # events_received should climb
 
 # 4. Optional: start the daemon automatically at logon
@@ -143,3 +143,9 @@ restored rather than dropped.
 If the display says `no sessions`, the daemon and the wiring are fine and
 Claude Code simply is not calling the hooks. Check `events_received` at
 `/health`, then re-run `install-hooks.ps1` and restart your sessions.
+
+If the footer says `no statusline data`, everything else is working but the
+statusline hook is not installed. That hook is the only source of cost and
+context figures. Re-run `install-hooks.ps1 -WithStatusLine` and restart your
+sessions. If you already had a status line of your own, the installer saves it
+and `uninstall.ps1` puts it back.
