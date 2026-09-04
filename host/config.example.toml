@@ -1,0 +1,8 @@
+# Copy to config.local.toml (gitignored). Not yet read by the daemon; CLI flags only in Phase 1.
+
+port = "COM5"          # omit to auto-detect by VID/PID
+stale_after_s = 300
+ended_grace_s = 30
+
+[labels]
+"C:/Repos/factory-dynamics-research" = "fd-research"

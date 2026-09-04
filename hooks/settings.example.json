@@ -1,0 +1,16 @@
+{
+  "_comment": "Merge into ~/.claude/settings.json. Adjust the python path if 'python' on PATH is the Store stub.",
+  "hooks": {
+    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
+    "PreToolUse":       [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
+    "Notification":     [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py --statusline"
+  }
+}
