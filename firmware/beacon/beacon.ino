@@ -91,6 +91,7 @@ static constexpr int16_t TEXT_DY    = 4;    // centres an 8 px glyph in a 16 px 
 #define C_NEED    ST77XX_RED
 #define C_IDLE    ST77XX_GREEN
 #define C_STALE   0xFD20   // amber
+#define C_ERR     0xF81F   // magenta
 #define C_END     0x4208   // dim grey
 
 // ---- Snapshot model ----
@@ -156,6 +157,7 @@ static uint16_t stateColor(const char* st) {
   if (!strcmp(st, "need"))  return C_NEED;
   if (!strcmp(st, "idle"))  return C_IDLE;
   if (!strcmp(st, "stale")) return C_STALE;
+  if (!strcmp(st, "err"))   return C_ERR;
   if (!strcmp(st, "end"))   return C_END;
   return C_START;
 }
@@ -262,6 +264,8 @@ static void drawRow(uint8_t i) {
     else         { bg = C_BG;   labelFg = ageFg = dot = C_NEED; }
   } else if (!strcmp(s.state, "stale")) {
     ageFg = C_STALE;
+  } else if (!strcmp(s.state, "err")) {
+    ageFg = C_ERR;
   } else if (!strcmp(s.state, "end")) {
     labelFg = C_MUTED;
   }
@@ -388,18 +392,19 @@ static bool parseMessage(const char* line) {
 static void demoLoad() {
   Snapshot d;
   d.valid = true;
-  d.n = 4;
-  d.count = 4;
+  d.n = 5;
+  d.count = 5;
   d.sel = 0;
   d.cost = 4.20f;
 
   struct { const char* l; const char* st; uint32_t age; int8_t ctx; const char* m; } rows[] = {
     {"env_monitoring", "need",  844, 41, "opus5"},
     {"session-beacon", "work",  126, 62, "fable5.1"},
-    {"factory-dynamics", "stale", 362, -1, ""},
+    {"factory-dynamics", "err",   362, -1, ""},
+    {"bench-metrology","stale", 900, -1, ""},
     {"homelab",        "idle",    7, 18, "sonnet5"},
   };
-  for (uint8_t i = 0; i < 4; i++) {
+  for (uint8_t i = 0; i < 5; i++) {
     copyStr(d.s[i].id, sizeof d.s[i].id, "demo");
     copyStr(d.s[i].label, sizeof d.s[i].label, rows[i].l);
     copyStr(d.s[i].state, sizeof d.s[i].state, rows[i].st);

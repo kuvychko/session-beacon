@@ -2,83 +2,104 @@
 
 Everything the beacon knows comes from two Claude Code features: **hooks** and the **statusline command**. Both are configured in `~/.claude/settings.json` and apply to every session on the machine, which is exactly what we want.
 
-Verified against Claude Code 2.1.261. Field names below are from memory of the hooks documentation and must be confirmed against a real payload during Phase 1 (see the "First run" checklist). Official reference: https://docs.anthropic.com/en/docs/claude-code/hooks
+Field names below are taken from the published hook and statusline schemas, not from memory. Reference: [hooks](https://code.claude.com/docs/en/hooks), [statusline](https://code.claude.com/docs/en/statusline). They have not yet been confirmed against a payload captured on this machine; see the first-run checklist at the end.
 
-## Hook events we use
-
-Each hook is a `command` hook. Claude Code runs the command, pipes a JSON payload to stdin, and waits for exit. Every payload includes at least `session_id`, `cwd`, `hook_event_name`, and `transcript_path`.
-
-| Event | Fires when | Beacon transition |
-|-------|-----------|-------------------|
-| `SessionStart` | Session opens or resumes (`source`: startup, resume, clear, compact) | create session as `STARTING` |
-| `UserPromptSubmit` | You send a prompt | `WORKING` |
-| `PreToolUse` | Before each tool call (matcher can filter by tool) | `WORKING`, records `tool_name` |
-| `PostToolUse` | After each tool call | `WORKING` (refreshes staleness timer) |
-| `Notification` | Claude Code wants your attention. `notification_type` is one of `permission_prompt`, `idle_prompt`, `auth_success`, `elicitation_dialog` | `permission_prompt` and `idle_prompt` and `elicitation_dialog` map to `NEEDS_INPUT` |
-| `Stop` | Claude finished its turn | `IDLE` |
-| `SubagentStop` | A subagent finished | no state change, phase 2 could show a subagent count |
-| `SessionEnd` | Session closes (`reason`: exit, clear, logout, prompt_input_exit, other) | `ENDED` |
-| `PreCompact` | Context about to compact | no state change, could flash a "compacting" hint |
-
-`Notification` with `permission_prompt` is the single most important event: it is the "you left me hanging" signal. `idle_prompt` fires after 60 s of Claude waiting for input, which covers the case where Claude asked a question via `AskUserQuestion` and you did not notice.
-
-Important timing detail: hooks run synchronously and `PreToolUse` in particular blocks the tool call until the hook exits. The forwarder must complete in well under 100 ms. It does a single HTTP POST with a 200 ms timeout and swallows all errors.
-
-## Statusline command for cost and context
-
-The statusline command receives a JSON payload on stdin on every refresh (roughly every 300 ms while active). It includes `session_id`, `model.display_name`, `workspace.current_dir`, `cost.total_cost_usd`, `cost.total_duration_ms`, and context window usage fields. That is our only cheap source of cost and context percent.
-
-The beacon-hook script, when invoked with `--statusline`, forwards this payload to `POST /status` and then prints a normal one-line statusline so the terminal still shows something useful. The host daemon rate-limits what it pushes to the device.
-
-If you already have a custom statusline, wrap it: beacon-hook can exec the existing command after forwarding. Phase 2 detail.
-
-Fallback if the statusline payload turns out not to carry what we need: parse `transcript_path` (a JSONL file) and sum `usage` blocks. More expensive, but it is a known-good data source.
-
-Not available from any hook: account-level rate-limit or remaining-credit figures like the ones `/usage` shows. If they become exposed in the statusline payload we can display them; otherwise "usage stats" means per-session cost and context percent.
-
-## Example settings.json fragment
-
-See `hooks/settings.example.json` for the full snippet. Shape:
+## Fields every hook receives
 
 ```json
 {
-  "hooks": {
-    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "PreToolUse":       [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "Notification":     [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "Stop":             [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }],
-    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py" }] }]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "python C:/Repos/session-beacon/hooks/beacon_hook.py --statusline"
-  }
+  "session_id": "...",
+  "prompt_id": "...",
+  "transcript_path": "...",
+  "cwd": "...",
+  "permission_mode": "default|plan|acceptEdits|auto|dontAsk|bypassPermissions",
+  "hook_event_name": "...",
+  "agent_id": "...",
+  "agent_type": "..."
 }
 ```
 
+Two of these are more useful than they first look:
+
+- **`permission_mode`** says whether a session can block on you at all. One running in `bypassPermissions` will never raise a permission prompt, so a long silence there means something different than it does elsewhere. Captured now, displayed later.
+- **`agent_id` and `agent_type`** are present only inside subagents. Subagent activity is therefore distinguishable from the parent's, which contradicts an earlier note in this file claiming it was not.
+
+There is no `source` field. `SessionStart` carries `session_start_reason` and `SessionEnd` carries `session_end_reason`.
+
+## Hook events we register
+
+| Event | Fires when | Beacon transition |
+|-------|-----------|-------------------|
+| `SessionStart` | Session opens, resumes, clears, compacts, or forks | Create session as `STARTING` |
+| `UserPromptSubmit` | You send a prompt | `WORKING`, clears any error |
+| `PostToolUse` | After each tool call, carries `tool_name` | `WORKING`, refreshes the staleness timer |
+| `PermissionRequest` | Claude Code needs permission for a tool | `NEEDS_INPUT` |
+| `PermissionDenied` | You denied it | `WORKING`, the prompt was answered |
+| `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below |
+| `Stop` | Claude finished its turn | `IDLE` |
+| `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
+| `SessionEnd` | Session closes | `ENDED` |
+
+**`PermissionRequest` is a dedicated event.** An earlier draft of this design watched `Notification` for `permission_prompt` instead. The dedicated event is more precise and arrives without depending on notification settings, so it is now the primary signal, with the notification kept as a second path.
+
+**`PreToolUse` is deliberately not registered.** `PostToolUse` alone is enough for activity and staleness, and skipping `PreToolUse` halves the hook cost on the busiest event. Turn it on only if a hint of what a session is *about* to do turns out to be worth the latency. The state machine handles it either way.
+
+**`StopFailure` closes a real gap.** Its `error_type` covers `rate_limit`, `overloaded`, `billing_error`, `authentication_failed`, and others. Without this event a session that died on a rate limit keeps looking busy until the staleness timer fires five minutes later, which reads as a crashed editor rather than as something waiting on you.
+
+### Notification types that mean a human is needed
+
+The documented `notification_type` values include far more than attention prompts. The beacon treats these as `NEEDS_INPUT`:
+
+`permission_prompt`, `idle_prompt`, `elicitation_dialog`, `elicitation_url_dialog`, `agent_needs_input`
+
+The rest are informational and only refresh the activity timer: `auth_success`, `elicitation_complete`, `elicitation_response`, `agent_completed`, and the `quota_auto_resume_*` family. `idle_prompt` fires after Claude has been waiting a while, which catches the case where you were asked a question and did not notice.
+
+### Timing
+
+Hooks run synchronously and block the flow until the command exits, so the forwarder must be fast. It does a single HTTP POST with a 200 ms timeout and swallows every error. Measured during scoping at roughly 170 ms per invocation through `uv run`, which carries uv's own startup; a direct interpreter path should be nearer 50 ms. Measure before deciding whether `PreToolUse` is affordable.
+
+## Statusline for cost and context
+
+The statusline command receives JSON on stdin on every refresh. The fields the beacon uses:
+
+| Field | Use |
+|-------|-----|
+| `session_id` | Joins to the hook stream |
+| `workspace.current_dir` | Label, preferred over the top-level `cwd` |
+| `model.display_name` | Shortened to fit the footer |
+| `cost.total_cost_usd` | Summed across sessions for the header |
+| `context_window.used_percentage` | Footer bar, pre-calculated |
+| `context_window.total_input_tokens`, `.total_output_tokens`, `.context_window_size` | Fallback when the percentage is null |
+
+That fallback matters: `used_percentage` is documented as null early in a session and again after a compaction until the next API call. Without it the footer would blank out at exactly the moments you are most likely to be looking.
+
+`beacon_hook.py --statusline` forwards the payload to `POST /status` and then prints a status line so the terminal still shows something useful. If you already have a custom statusline, it can be wrapped rather than replaced. That is a phase 2 detail.
+
+Account-level rate limit and remaining credit figures, the ones `/usage` shows, are not exposed to hooks or to the statusline. "Usage stats" on this device therefore means per-session cost and context percent.
+
+## Example settings.json fragment
+
+See `hooks/settings.example.json` for the exact snippet to merge.
+
 Windows notes:
 
-- Hook commands on Windows are run through a shell. Forward slashes in the path avoid escaping trouble. Use an absolute path to the Python interpreter if `python` on PATH resolves to the Microsoft Store stub.
-- Measured during scoping: about 170 ms per hook invocation when launched via `uv run python` (includes uv overhead). Plain `python.exe` should be nearer 50 ms. That is fine for `Notification`, `Stop`, and session events, but `PreToolUse`/`PostToolUse` fire on every tool call, so measure with the real interpreter path before enabling them. If too slow, drop the tool-use hooks (staleness detection degrades slightly) or rewrite the forwarder as a small compiled exe.
+- Hook commands run through a shell. Forward slashes in paths avoid escaping trouble. Use an absolute path to the interpreter if `python` on PATH resolves to the Microsoft Store stub.
+- Hooks are read at session start, so a settings change needs a new session before it takes effect.
 
 ## Session identity and labels
 
-`session_id` is unique per session, including resumes. The label shown on screen is the basename of `cwd` by default. Override in `host/config.toml`:
+`session_id` is unique per session, including resumes. The label is the basename of `cwd` by default, capped at 16 characters. Override in `host/config.toml`:
 
 ```toml
 [labels]
 "C:/Repos/factory-dynamics-research" = "fd-research"
 ```
 
-Worktrees and subagents: a subagent shares the parent's `session_id` in hook payloads, so tool calls from subagents just look like activity. Good enough for phase 1.
+## First-run checklist
 
-## First run checklist
+The schema above is documented, not observed. Before trusting it on this machine:
 
-Before trusting any of the above:
-
-1. Add only a `Notification` hook that appends the raw stdin JSON to a file. Trigger a permission prompt. Confirm `notification_type` and its values.
-2. Do the same for the statusline command. Confirm the cost and context field names.
-3. Measure hook latency with `Measure-Command` around `python beacon_hook.py < sample.json`.
-4. Record the confirmed payloads as fixtures under `host/tests/fixtures/` so the state machine tests use real shapes.
+1. Point the `Notification` and `PermissionRequest` hooks at a script that appends raw stdin to a file. Trigger a permission prompt in a scratch session. Confirm the event names and `notification_type` values that actually arrive.
+2. Do the same for the statusline command. Confirm the context window fields are populated and watch what happens right after a `/compact`.
+3. Measure hook latency with `Measure-Command` against the real interpreter path.
+4. Save the captured payloads as fixtures under `host/tests/fixtures/` and point the state machine tests at them, replacing the hand-written dictionaries they use today.

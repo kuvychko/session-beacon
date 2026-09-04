@@ -26,9 +26,11 @@ stateDiagram-v2
     STARTING --> WORKING: UserPromptSubmit
     IDLE --> WORKING: UserPromptSubmit
     WORKING --> WORKING: PreToolUse / PostToolUse
-    WORKING --> NEEDS_INPUT: Notification(permission_prompt)
-    NEEDS_INPUT --> WORKING: PreToolUse (permission granted)
+    WORKING --> NEEDS_INPUT: PermissionRequest
+    NEEDS_INPUT --> WORKING: PostToolUse / PermissionDenied
     WORKING --> IDLE: Stop
+    WORKING --> ERROR: StopFailure
+    ERROR --> WORKING: UserPromptSubmit
     IDLE --> NEEDS_INPUT: Notification(idle_prompt)
     STARTING --> ENDED: SessionEnd
     WORKING --> ENDED: SessionEnd
@@ -43,12 +45,15 @@ State semantics:
 |-------|---------|--------|
 | `STARTING` | Session opened, no prompt yet | grey |
 | `WORKING` | Claude is running (thinking or using tools) | blue |
-| `NEEDS_INPUT` | Blocked on a permission prompt, or idle-waiting for you after a notification | red, blinking |
+| `NEEDS_INPUT` | Blocked on a permission prompt, or idle-waiting for you after a notification | red, pulsing |
+| `ERROR` | The turn ended on an API error such as a rate limit or an overload | magenta |
 | `IDLE` | Claude finished its turn, waiting for the next prompt | green |
 | `STALE` | `WORKING` but no event for `stale_after_s` (default 300 s) | amber |
 | `ENDED` | Session closed; kept on screen briefly, then dropped | dim grey |
 
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
+
+`ERROR` exists because without it a rate-limited session keeps looking busy until the staleness timer fires minutes later, which reads as a dead editor rather than as something that stopped and is waiting for you. Sort order puts it just below `NEEDS_INPUT`.
 
 Additional per-session info:
 
@@ -119,6 +124,7 @@ Row colours:
 | `work` | blue | Plain |
 | `idle` | green | Plain |
 | `stale` | amber | Age also drawn amber |
+| `err` | magenta | Age also drawn magenta |
 | `start` | grey | Plain |
 | `end` | dim grey | Label drawn grey |
 

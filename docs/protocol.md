@@ -36,7 +36,7 @@ Session object:
 |-------|------|---------|
 | `id` | string | First 8 chars of `session_id`. Used on device only for change detection. |
 | `l` | string | Label, max 16 chars, truncated by host. |
-| `st` | string | `start`, `work`, `need`, `idle`, `stale`, `end`. Drives the row's dot colour, and `need` fills the whole row. |
+| `st` | string | `start`, `work`, `need`, `err`, `idle`, `stale`, `end`. Drives the row's dot colour, and `need` fills the whole row. |
 | `age` | int | Seconds in current state. |
 | `ctx` | int | Context window used, percent. Optional. |
 | `m` | string | Model short name, max 8 chars. Optional. Shown only for the featured session. |

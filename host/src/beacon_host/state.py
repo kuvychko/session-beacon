@@ -16,6 +16,7 @@ class State(str, Enum):
     STARTING = "start"
     WORKING = "work"
     NEEDS_INPUT = "need"
+    ERROR = "err"
     IDLE = "idle"
     STALE = "stale"
     ENDED = "end"
@@ -24,14 +25,23 @@ class State(str, Enum):
 # Display priority: lower sorts first.
 PRIORITY = {
     State.NEEDS_INPUT: 0,
-    State.WORKING: 1,
-    State.STALE: 2,
-    State.STARTING: 3,
-    State.IDLE: 4,
-    State.ENDED: 5,
+    State.ERROR: 1,
+    State.WORKING: 2,
+    State.STALE: 3,
+    State.STARTING: 4,
+    State.IDLE: 5,
+    State.ENDED: 6,
 }
 
-ATTENTION_NOTIFICATIONS = {"permission_prompt", "idle_prompt", "elicitation_dialog"}
+# Notification types that mean a human has to do something. Taken from the
+# documented `notification_type` values; the rest are informational.
+ATTENTION_NOTIFICATIONS = {
+    "permission_prompt",
+    "idle_prompt",
+    "elicitation_dialog",
+    "elicitation_url_dialog",
+    "agent_needs_input",
+}
 
 
 @dataclass
@@ -46,6 +56,8 @@ class Session:
     model: str = ""
     cost_usd: float | None = None
     ctx_pct: int | None = None
+    permission_mode: str = ""
+    error_type: str = ""
 
     def set_state(self, new: State, now: float) -> None:
         if new != self.state:
@@ -65,19 +77,36 @@ class SessionStore:
     # ---- inputs ----
 
     def apply_event(self, ev: dict[str, Any], now: float) -> None:
-        """Apply one hook payload as sent by Claude Code."""
+        """Apply one hook payload as sent by Claude Code.
+
+        Field names follow the documented hook input schema. Note that
+        SessionStart carries `session_start_reason` and SessionEnd carries
+        `session_end_reason`; neither is a plain `source` or `reason`.
+        """
         sid = ev.get("session_id")
         if not sid:
             return
         name = ev.get("hook_event_name", "")
         s = self._get_or_create(sid, ev.get("cwd", ""), now)
+        if mode := ev.get("permission_mode"):
+            s.permission_mode = mode
 
         if name == "SessionStart":
+            s.error_type = ""
             s.set_state(State.STARTING, now)
         elif name == "UserPromptSubmit":
+            s.error_type = ""
             s.set_state(State.WORKING, now)
-        elif name in ("PreToolUse", "PostToolUse"):
+        elif name in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+            # Activity. Only PostToolUse is registered by default; PreToolUse
+            # is handled too in case someone turns it on for finer resolution.
             s.last_tool = ev.get("tool_name", "") or s.last_tool
+            s.set_state(State.WORKING, now)
+        elif name == "PermissionRequest":
+            # A dedicated event, more precise than watching Notification.
+            s.set_state(State.NEEDS_INPUT, now)
+        elif name == "PermissionDenied":
+            # The prompt was answered, just not with a yes.
             s.set_state(State.WORKING, now)
         elif name == "Notification":
             if ev.get("notification_type") in ATTENTION_NOTIFICATIONS:
@@ -86,6 +115,12 @@ class SessionStore:
                 s.last_event = now
         elif name == "Stop":
             s.set_state(State.IDLE, now)
+        elif name == "StopFailure":
+            # The turn ended on an API error: rate limit, overload, billing.
+            # Without this the session looks busy until it goes stale, which
+            # reads as a crashed editor rather than something needing a human.
+            s.error_type = ev.get("error_type", "") or "error"
+            s.set_state(State.ERROR, now)
         elif name == "SessionEnd":
             s.set_state(State.ENDED, now)
         else:
@@ -170,17 +205,19 @@ def short_model(display_name: str) -> str:
 
 
 def extract_ctx_pct(st: dict[str, Any]) -> int | None:
-    """Best-effort context percent from a statusline payload.
+    """Context percent from a statusline payload.
 
-    The exact field names are unconfirmed; this tries the likely shapes and
-    returns None if nothing matches. Fix once a real payload is captured.
+    `context_window.used_percentage` is pre-calculated and is what we want,
+    but the docs note it can be null early in a session and again right after
+    a compaction, so fall back to the token counts before giving up.
     """
     cw = st.get("context_window") or {}
-    for key in ("used_percentage", "used_pct", "percent_used"):
-        v = cw.get(key)
-        if isinstance(v, (int, float)):
-            return int(v)
-    used, size = cw.get("used_tokens"), cw.get("context_window_size")
-    if isinstance(used, (int, float)) and isinstance(size, (int, float)) and size > 0:
+    pct = cw.get("used_percentage")
+    if isinstance(pct, (int, float)):
+        return int(pct)
+    size = cw.get("context_window_size")
+    tokens = [cw.get("total_input_tokens"), cw.get("total_output_tokens")]
+    used = sum(t for t in tokens if isinstance(t, (int, float)))
+    if used and isinstance(size, (int, float)) and size > 0:
         return int(100 * used / size)
     return None
