@@ -23,6 +23,7 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 ## Conventions
 
 - Firmware uses Arduino pin names (`D10`), never raw GPIO numbers. Wiring is in `docs/hardware.md` and matches the `env_monitoring` project at `C:\Repos\env_monitoring`.
+- The display panel is BGR-wired, so `applyPanelColorOrder()` must run after every `setRotation()` call. Without it red and blue render swapped. This is a per-unit trait, not a property of the part number, and `env_monitoring` does not need it. Do not "clean up" that register write.
 - Firmware is dumb: it renders what the host sends. Do not add policy (sorting, thresholds, labels) to the firmware.
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.

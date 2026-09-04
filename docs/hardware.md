@@ -3,7 +3,7 @@
 ## Parts
 
 - **Arduino Nano ESP32** (ABX00083). ESP32-S3, USB-C, native USB CDC. Arduino pin names (`D10`, not GPIO numbers) are used throughout.
-- **1.8" TFT LCD, 128x160, ST7735S, 3.3 V, SPI, 8-pin.** [JESSINIE module](https://www.amazon.com/dp/B0D31BGJWF) (ASIN B0D31BGJWF), the same unit used in `env_monitoring`.
+- **1.8" TFT LCD, 128x160, ST7735S, 3.3 V, SPI, 8-pin.** [JESSINIE module](https://www.amazon.com/dp/B0D31BGJWF) (ASIN B0D31BGJWF), the same listing used in `env_monitoring`. Same part number, but not an identical panel: see [Panel colour order](#panel-colour-order).
 
 Power: everything runs off the Nano's 3V3 pin from USB. The display draws about 30 mA including backlight, so the onboard regulator handles it comfortably.
 
@@ -53,11 +53,35 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RS
 
 tft.initR(INITR_GREENTAB);   // required for the ST7735S variant
 tft.setRotation(1);          // landscape, 160 wide x 128 high
+applyPanelColorOrder();      // this panel is BGR-wired, see below
 ```
 
-`INITR_GREENTAB` is not a guess to tune. `env_monitoring` established that this panel is an ST7735**S**, and the ST7735 (`BLACKTAB`) and ST7735R (`REDTAB`) gamma and offset tables produce shifted images or wrong colours on it.
+`INITR_GREENTAB` is not a guess to tune. `env_monitoring` established that this panel is an ST7735**S**, and the ST7735 (`BLACKTAB`) and ST7735R (`REDTAB`) gamma and offset tables produce shifted images or wrong colours on it. Bench testing confirmed the offsets and rotation are correct with `GREENTAB`.
 
 The 5-argument constructor is **software SPI**, chosen in `env_monitoring` for reliability. The beacon redraws even less often than the IAQ dashboard, so it stays. If flicker or slowness appears, the hardware SPI constructor `Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST)` is a drop-in: D11 and D13 are already the Nano ESP32's hardware SPI pins, so no rewiring is needed.
+
+### Panel colour order
+
+**This unit is BGR-wired and needs a correction that `env_monitoring` did not.** With the library's defaults it renders red and blue swapped. The two displays came from the same product listing, so treat colour order as a per-unit trait to check on every new panel rather than a property of the part number.
+
+The Adafruit library exposes no API for this, so the fix is a direct write to the Memory Access Control register with the colour-order bit cleared:
+
+```cpp
+static constexpr uint8_t CMD_MADCTL  = 0x36;
+static constexpr uint8_t MADCTL_MY   = 0x80;
+static constexpr uint8_t MADCTL_MV   = 0x20;
+static constexpr uint8_t MADCTL_BGR  = 0x08;  // clear this bit for RGB order
+
+// What the library writes for INITR_GREENTAB at rotation 1, minus the BGR bit.
+static constexpr uint8_t MADCTL_ROT1_RGB = MADCTL_MY | MADCTL_MV;
+
+static void applyPanelColorOrder() {
+  uint8_t v = MADCTL_ROT1_RGB;
+  tft.sendCommand(CMD_MADCTL, &v, 1);
+}
+```
+
+`setRotation()` rewrites this register, so the override has to come after it. There is only one `setRotation()` call in the firmware; any new one needs `applyPanelColorOrder()` after it. With the override in place every `ST77XX_*` constant and every raw hex colour behaves as documented, so no other code has to know about this.
 
 ## Arduino IDE setup
 
@@ -69,7 +93,7 @@ The 5-argument constructor is **software SPI**, chosen in `env_monitoring` for r
 
 Flash `firmware/tft_smoketest/tft_smoketest.ino` before `beacon.ino`. It needs no host software and no ArduinoJson, so it isolates wiring problems from everything else. Open the Serial Monitor at 115200 with the Newline line ending.
 
-It runs a self-test on boot, then accepts single-letter commands so you can re-run any step or change the panel colour order without reflashing.
+It applies this unit's colour-order correction at init, runs a self-test, then accepts single-letter commands so you can re-run any step or change the colour order without reflashing.
 
 | Command | Does |
 |---------|------|
@@ -79,9 +103,9 @@ It runs a self-test on boot, then accepts single-letter commands so you can re-r
 | `t` | Text metrics |
 | `l` | Mock of the real beacon layout |
 | `a` | Whole self-test again |
-| `n` | Reset the colour-order register to the library default |
+| `n` | Revert to the library's colour-order value, which is wrong on this unit |
 | `x` | Toggle the RGB/BGR colour-order bit |
-| `mA8` | Set the colour-order register to a raw hex value |
+| `mA0` | Set the colour-order register to a raw hex value |
 
 What each step proves:
 
@@ -96,10 +120,12 @@ If the screen stays dark through all of it but the Serial Monitor prints the ban
 
 ## Colour channel troubleshooting
 
-The `c` command draws six patches chosen so that every channel permutation produces a different-looking screen. Read the bars top to bottom and find the column that matches.
+Resolved for the current unit, but keep this for the next panel.
 
-| Bar | Sent | Correct | Red and blue swapped | Red and green swapped | Green and blue swapped |
-|-----|------|---------|----------------------|-----------------------|------------------------|
+The `c` command in the smoke test draws six patches chosen so that every channel permutation produces a different-looking screen. Read the bars top to bottom and find the column that matches.
+
+| Bar | Sent | Correct | R and B swapped | R and G swapped | G and B swapped |
+|-----|------|---------|-----------------|-----------------|-----------------|
 | R | `F800` | red | blue | green | red |
 | G | `07E0` | green | green | red | blue |
 | B | `001F` | blue | red | blue | green |
@@ -107,11 +133,11 @@ The `c` command draws six patches chosen so that every channel permutation produ
 | M | `F81F` | magenta | magenta | cyan | yellow |
 | Y | `FFE0` | yellow | cyan | yellow | magenta |
 
-Only the red and blue case is a panel setting. The controller's colour-order flag swaps those two channels and nothing else, so `x` fixes it and the fix belongs in `beacon.ino` as an explicit register write after `setRotation`.
+Pure red, green, and blue alone cannot distinguish these cases. The cyan, magenta, and yellow bars are what disambiguate.
 
-The other two permutations cannot come from that flag. Red and green also occupy different bit widths in the pixel format, five bits against six, so a genuine swap of those two is not something the controller offers. If the chart lands in one of those columns, the fix is to correct the palette constants in software rather than to hunt for an init sequence. That costs nothing at runtime: the beacon defines every colour in one block at the top of `beacon.ino`.
+Red and blue swapped is the panel colour-order flag and is fixed in the register, as described above. Both sketches now boot with the correction applied; `n` reverts to the library value to show the fault again, and `x` toggles.
 
-If a colour-order experiment leaves the screen mirrored or rotated, `n` restores the library default.
+The other two permutations cannot come from that flag. Red and green also occupy different bit widths in the pixel format, five bits against six, so a genuine swap of those two is not something the controller offers. If a future panel lands in one of those columns, correct the palette constants in software instead of hunting for an init sequence. That costs nothing at runtime because the beacon defines every colour in one block at the top of `beacon.ino`.
 
 ## USB serial notes
 

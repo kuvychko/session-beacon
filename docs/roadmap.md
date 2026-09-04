@@ -11,7 +11,7 @@ Docs, repo layout, protocol, skeletons. This is where the repo stands now.
 Goal: the screen shows real session states from real Claude Code sessions.
 
 1. Confirm hook payload shapes (see the first-run checklist in [claude-code-integration.md](claude-code-integration.md)). Save fixtures.
-2. Wire the display and flash `firmware/tft_smoketest/tft_smoketest.ino`. Work through the bring-up table in [hardware.md](hardware.md) until colours, offsets, rotation, and the layout mock all look right. No host software needed.
+2. ~~Wire the display and flash `firmware/tft_smoketest/tft_smoketest.ino`.~~ **Done.** Wiring, offsets, rotation, and text metrics all check out. The panel turned out to be BGR-wired and needed a colour-order register fix, now applied in both sketches. See [hardware.md](hardware.md#panel-colour-order).
 3. Firmware: parse `snap`, draw header, six rows, footer, "no host" screen. Test with snapshot lines pasted into the Arduino serial monitor before the host exists.
 4. Host: `state.py` with unit tests against the fixtures. `hook_server.py` and `serial_link.py`. Run from a terminal with `--port COMx`.
 5. Hook forwarder and settings snippet. Install, open three VS Code windows, watch the beacon.

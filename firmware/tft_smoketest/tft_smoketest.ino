@@ -6,6 +6,9 @@
 // Board:     Arduino Nano ESP32 (Arduino ESP32 Boards package)
 // Libraries: Adafruit GFX, Adafruit ST7735 and ST7789
 //
+// This panel is BGR-wired, so the sketch corrects the colour order at init.
+// Colours should be right out of the box; n shows the uncorrected version.
+//
 // On boot it runs a self-test, then drops into an interactive mode. Open the
 // Serial Monitor at 115200 with the Newline line ending and type a command:
 //
@@ -15,13 +18,13 @@
 //   t   text metrics
 //   l   mock of the real beacon layout
 //   a   run the whole self-test again
-//   n   reset MADCTL to the library default via setRotation(1)
+//   n   revert to the library's MADCTL, which swaps red and blue here
 //   x   toggle the MADCTL colour-order bit, the RGB/BGR flag
-//   mA8 set MADCTL to a raw hex value, e.g. mA8 or mA0
+//   mA0 set MADCTL to a raw hex value, e.g. mA0 or mA8
 //   ?   this list
 //
 // If a MADCTL experiment leaves the screen mirrored or rotated, type n to get
-// back to a known-good state.
+// back to a known-good geometry.
 
 #include <SPI.h>
 #include <Adafruit_GFX.h>
@@ -42,11 +45,15 @@ static constexpr int16_t W = 160, H = 128;
 static constexpr uint8_t CMD_MADCTL = 0x36;
 static constexpr uint8_t MADCTL_BGR = 0x08;
 
-// The library's value for INITR_GREENTAB at rotation 1. Only used as the
-// starting point for the x command; n always restores the real default.
-static constexpr uint8_t MADCTL_DEFAULT_ROT1 = 0xA8;
+// What the library writes for INITR_GREENTAB at rotation 1: MY | MV | BGR.
+// This panel is BGR-wired, so with the library default red and blue come out
+// swapped. Clearing the BGR bit corrects it. Confirmed on the bench with the
+// colour chart below. The env_monitoring display is RGB despite the same part
+// number, so treat this as a per-unit trait.
+static constexpr uint8_t MADCTL_LIB_ROT1 = 0xA8;
+static constexpr uint8_t MADCTL_ROT1_RGB = MADCTL_LIB_ROT1 & ~MADCTL_BGR;
 
-uint8_t madctl = MADCTL_DEFAULT_ROT1;
+uint8_t madctl = MADCTL_ROT1_RGB;
 bool madctlOverridden = false;
 
 char line[64];
@@ -62,11 +69,14 @@ static void applyMadctl(uint8_t v) {
                 (madctl & MADCTL_BGR) ? "BGR" : "RGB");
 }
 
+// Restores the library's own value, which on this panel is the wrong one.
+// Useful for showing the fault again, and as an escape hatch if a raw MADCTL
+// experiment leaves the screen mirrored.
 static void resetMadctl() {
   tft.setRotation(1);
-  madctl = MADCTL_DEFAULT_ROT1;
+  madctl = MADCTL_LIB_ROT1;
   madctlOverridden = false;
-  Serial.println("MADCTL reset to library default for rotation 1");
+  Serial.println("MADCTL reset to library default: BGR, red and blue swapped");
 }
 
 static void madctlStatus(char* out, size_t n) {
@@ -119,9 +129,11 @@ static void testColorChart() {
   Serial.println("  C     07FF    cyan      yellow    magenta   cyan");
   Serial.println("  M     F81F    magenta   magenta   cyan      yellow");
   Serial.println("  Y     FFE0    yellow    cyan      yellow    magenta");
-  Serial.println("\nR<->B is the panel colour-order flag: fix it with x.");
+  Serial.println("\nR<->B is the panel colour-order flag, corrected at init on");
+  Serial.println("this unit. Type n to see the uncorrected version, x to toggle.");
   Serial.println("R<->G or G<->B cannot come from MADCTL and need a palette fix.");
-  Serial.printf("Current %s\n", (madctl & MADCTL_BGR) ? "BGR" : "RGB");
+  Serial.printf("Current order: %s%s\n", (madctl & MADCTL_BGR) ? "BGR" : "RGB",
+                (madctl & MADCTL_BGR) ? "  <- expect red and blue swapped" : "  <- expect correct colours");
 }
 
 // ---- 2. Channel ramps ----
@@ -241,7 +253,7 @@ static void selfTest() {
 
 static void help() {
   Serial.println("\ncommands: c chart | r ramps | g geometry | t text | l layout");
-  Serial.println("          a self-test | n reset MADCTL | x toggle RGB/BGR | mXX raw MADCTL");
+  Serial.println("          a self-test | n library MADCTL | x toggle RGB/BGR | mXX raw MADCTL");
 }
 
 // ---- Command handling ----
@@ -275,8 +287,9 @@ void setup() {
   Serial.println("\n=== Session Beacon TFT smoke test ===");
   Serial.println("pins: CS=D10 DC=D8 RST=D9 MOSI=D11 SCLK=D13, VCC=3V3, BLK=3V3");
 
-  tft.initR(INITR_GREENTAB);  // required for the ST7735S variant
-  tft.setRotation(1);         // landscape 160x128
+  tft.initR(INITR_GREENTAB);        // required for the ST7735S variant
+  tft.setRotation(1);               // landscape 160x128
+  applyMadctl(MADCTL_ROT1_RGB);     // this panel is BGR-wired, correct it
   Serial.println("display initialised");
 
   selfTest();

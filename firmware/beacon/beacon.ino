@@ -23,6 +23,29 @@
 
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
+// ---- Panel colour order ----
+//
+// This panel is wired BGR, so the library's default for INITR_GREENTAB shows
+// red and blue swapped. Confirmed on the bench with the colour chart in
+// tft_smoketest. Note that the otherwise identical display in env_monitoring
+// is RGB, so this is a per-unit trait, not a property of the part number.
+//
+// setRotation() is the only thing that writes MADCTL, so overriding it once
+// after setRotation() is enough. Any new setRotation() call must be followed
+// by applyPanelColorOrder() again.
+static constexpr uint8_t CMD_MADCTL  = 0x36;
+static constexpr uint8_t MADCTL_MY   = 0x80;
+static constexpr uint8_t MADCTL_MV   = 0x20;
+static constexpr uint8_t MADCTL_BGR  = 0x08;  // clear this bit for RGB order
+
+// What the library writes for INITR_GREENTAB at rotation 1, minus the BGR bit.
+static constexpr uint8_t MADCTL_ROT1_RGB = MADCTL_MY | MADCTL_MV;
+
+static void applyPanelColorOrder() {
+  uint8_t v = MADCTL_ROT1_RGB;
+  tft.sendCommand(CMD_MADCTL, &v, 1);
+}
+
 // ---- Constants ----
 static constexpr const char* FW_VERSION   = "0.1.0";
 static constexpr uint8_t  PROTOCOL_V      = 1;
@@ -242,7 +265,8 @@ static void drawAll() {
 void setup() {
   Serial.begin(BAUD);
   tft.initR(INITR_GREENTAB);
-  tft.setRotation(1);  // landscape 160x128
+  tft.setRotation(1);      // landscape 160x128
+  applyPanelColorOrder();  // must follow setRotation, see note above
   drawNoHost();
   showingNoHost = true;
 }
