@@ -11,7 +11,7 @@ Sent whenever host state changes, and at least once per second while any session
 ```json
 {"t":"snap","v":1,"ts":1725480000,"n":4,"cost":4.2,"sel":1,
  "s":[
-  {"id":"a1b2c3d4","l":"session-beacon","st":"work","age":120,"ctx":62,"m":"fable"},
+  {"id":"a1b2c3d4","l":"session-beacon","st":"work","age":120,"ctx":62,"m":"fable5.1"},
   {"id":"e5f6a7b8","l":"env_monitoring","st":"need","age":840,"ctx":41,"m":"opus"},
   {"id":"c9d0e1f2","l":"homelab","st":"idle","age":5},
   {"id":"a3b4c5d6","l":"factory-dyn","st":"stale","age":360}
@@ -35,11 +35,11 @@ Session object:
 | Field | Type | Meaning |
 |-------|------|---------|
 | `id` | string | First 8 chars of `session_id`. Used on device only for change detection. |
-| `l` | string | Label, max 14 chars, truncated by host. |
-| `st` | string | `start`, `work`, `need`, `idle`, `stale`, `end`. |
+| `l` | string | Label, max 16 chars, truncated by host. |
+| `st` | string | `start`, `work`, `need`, `idle`, `stale`, `end`. Drives the row's dot colour, and `need` fills the whole row. |
 | `age` | int | Seconds in current state. |
 | `ctx` | int | Context window used, percent. Optional. |
-| `m` | string | Model short name, max 8 chars. Optional. |
+| `m` | string | Model short name, max 8 chars. Optional. Shown only for the featured session. |
 | `tool` | string | Last tool name, max 10 chars. Optional, phase 2. |
 
 ## Other host messages

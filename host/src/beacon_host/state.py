@@ -150,7 +150,7 @@ class SessionStore:
     def _row(s: Session, now: float) -> dict[str, Any]:
         row: dict[str, Any] = {
             "id": s.session_id[:8],
-            "l": s.label[:14],
+            "l": s.label[:16],
             "st": s.state.value,
             "age": int(now - s.state_since),
         }

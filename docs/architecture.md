@@ -77,30 +77,56 @@ Daemon lifecycle on Windows: run at login via a Task Scheduler entry or a Startu
 
 - Single sketch, Arduino IDE, same libraries as `env_monitoring` (Adafruit_GFX, Adafruit_ST7735) plus ArduinoJson.
 - `Serial` (USB CDC) at 115200. Reads until newline, parses with a fixed-size ArduinoJson document (2 KB is plenty for 6 sessions).
-- Redraws the full frame on every snapshot. At 160x128 a full redraw is a few milliseconds; no partial updates needed in phase 1. If flicker is visible, move to per-row dirty tracking.
+- Repaints only changed regions, tracking what the header, each row, and the footer currently show. Software SPI makes a full repaint visible as a sweep, and the host resends a snapshot every second to advance timers, so this is not a premature optimisation.
 - Shows a "no host" screen if nothing arrives for 10 s, so an unplugged or dead daemon is obvious.
 - Optional heartbeat back to host so the host can log device presence.
+- Accepts local commands on the same serial line so the layout can be exercised without a host. A line starting with `{` is a protocol message; anything else is a command, and `demo` loads a canned snapshot with running timers.
 
 ## Screen layout (160x128 landscape)
 
 ```
 +----------------------------------------+
-| BEACON            3 active   $4.20     |  header, 16 px
+| BEACON      4 active          $4.20    |  header, 16 px
 |----------------------------------------|
-| o session-beacon    working    2m      |  row 1
-| o env_monitoring    NEEDS YOU  14m     |  row 2 (red, blinking)
-| o homelab           idle       0m      |  row 3
-| o factory-dyn       stale      6m      |  row 4
+|############ env_monitoring      14m ####|  row 1, filled red, pulsing
+| o session-beacon                 2m    |  row 2, blue dot
+| o factory-dynamics               6m    |  row 3, amber dot
+| o homelab                        7s    |  row 4, green dot
 |                                        |
 |                                        |
 |----------------------------------------|
-| ctx 62% [######....]  fable 5.1        |  footer, 16 px: featured session
+| ctx 41% [####......]          opus5    |  footer, 16 px: featured session
 +----------------------------------------+
 ```
 
-Six rows of 16 px fit between header and footer using the default 6x8 GFX font at size 1 (a 14-char label is 84 px). If more than six sessions are live, the host sorts `NEEDS_INPUT` first, then `WORKING`, then the rest, and the header shows an overflow count.
+Six rows of 16 px fit between the header and the footer, using the default 6x8 GFX font at size 1.
 
-Blinking is done on-device from the `need` state (toggle every 500 ms) so the host does not have to send frames for it.
+**State is carried by colour, not by a word.** An earlier draft spelled the state out in each row, but the widest one, `NEEDS YOU`, needs 54 px, and a row only has 160 px to divide between the dot, a 16-character label, the state, and the age. That overcommits the row by eight pixels and the state text runs into the age. Dropping the word frees enough space that the label and the age can never collide.
+
+| Element | x range | Notes |
+|---------|---------|-------|
+| Dot | 3 to 9 | Filled circle in the state colour |
+| Label | 13 to 109 | Up to 16 characters, truncated by the host |
+| Age | ends at 157 | Right-aligned, up to 4 characters |
+
+That leaves 24 px of clear space between the longest label and the longest age.
+
+Row colours:
+
+| State | Dot | Row treatment |
+|-------|-----|---------------|
+| `need` | none, the row itself is the signal | Filled edge to edge, alternating red-on-black and black-on-red twice a second |
+| `work` | blue | Plain |
+| `idle` | green | Plain |
+| `stale` | amber | Age also drawn amber |
+| `start` | grey | Plain |
+| `end` | dim grey | Label drawn grey |
+
+The pulse alternates between two readable states rather than flashing text in and out, so the row reads as a pulse instead of a flicker. Because it is driven by a local timer, the host never has to send frames for it.
+
+If more than six sessions are live, the host sorts `need` first, then `work`, then the rest, and the header's active count reveals the overflow.
+
+**Only changed regions are repainted.** A full repaint over software SPI is slow enough to be visible as a sweep, and the host resends a snapshot every second purely to advance the timers. The device keeps a record of what each row currently shows and compares the *formatted* age string rather than the raw seconds, so a row showing `14m` stays untouched for a full minute. In steady state a snapshot costs nothing to draw.
 
 ## Non-goals (for now)
 

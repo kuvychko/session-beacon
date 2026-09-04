@@ -206,42 +206,52 @@ static void testText() {
 }
 
 // ---- 5. Beacon layout mock ----
+//
+// Mirrors the real row geometry in beacon.ino: dot, 16-char label, and a
+// right-aligned age, with state carried by colour. Keep the two in step.
 static void testBeaconLayout() {
   const int16_t HEADER_H = 16, ROW_H = 16, FOOTER_H = 16;
-  struct { const char* label; const char* state; const char* age; uint16_t col; } rows[] = {
-    {"session-beacon", "working",   "2m",  0x04FF},
-    {"env_monitoring", "NEEDS YOU", "14m", ST77XX_RED},
-    {"homelab",        "idle",      "0m",  ST77XX_GREEN},
-    {"factory-dyn",    "stale",     "6m",  0xFD20},
+  const int16_t LABEL_X = 13, AGE_RIGHT = 157;
+  struct { const char* label; const char* age; uint16_t col; bool need; } rows[] = {
+    {"env_monitoring",   "14m", ST77XX_RED,   true },
+    {"session-beacon",   "2m",  0x04FF,       false},
+    {"factory-dynamics", "6m",  0xFD20,       false},
+    {"homelab",          "7s",  ST77XX_GREEN, false},
   };
 
   tft.fillScreen(ST77XX_BLACK);
   tft.fillRect(0, 0, W, HEADER_H, 0x000F);
   tft.setTextSize(1);
   tft.setTextColor(ST77XX_WHITE);
-  tft.setCursor(4, 4);   tft.print("BEACON");
-  tft.setCursor(64, 4);  tft.print("4 active");
-  tft.setCursor(124, 4); tft.print("$4.20");
+  tft.setCursor(4, 4);  tft.print("BEACON");
+  tft.setCursor(58, 4); tft.print("4 active");
+  const char* cost = "$4.20";
+  tft.setCursor(W - 4 - 6 * strlen(cost), 4); tft.print(cost);
 
   for (uint8_t i = 0; i < 4; i++) {
     int16_t y = HEADER_H + i * ROW_H;
-    tft.fillCircle(6, y + 8, 3, rows[i].col);
-    tft.setTextColor(rows[i].col == ST77XX_RED ? ST77XX_RED : ST77XX_WHITE);
-    tft.setCursor(14, y + 4);  tft.print(rows[i].label);
-    tft.setTextColor(rows[i].col);
-    tft.setCursor(104, y + 4); tft.print(rows[i].state);
-    tft.setTextColor(0x7BEF);
-    tft.setCursor(W - 4 - 6 * strlen(rows[i].age), y + 4); tft.print(rows[i].age);
+    uint16_t bg = rows[i].need ? ST77XX_RED : ST77XX_BLACK;
+    uint16_t fg = rows[i].need ? ST77XX_BLACK : ST77XX_WHITE;
+    uint16_t agefg = rows[i].need ? ST77XX_BLACK : 0x7BEF;
+
+    tft.fillRect(0, y, W, ROW_H, bg);
+    tft.fillCircle(6, y + 8, 3, rows[i].need ? ST77XX_BLACK : rows[i].col);
+    tft.setTextColor(fg);
+    tft.setCursor(LABEL_X, y + 4); tft.print(rows[i].label);
+    tft.setTextColor(agefg);
+    tft.setCursor(AGE_RIGHT - 6 * strlen(rows[i].age), y + 4); tft.print(rows[i].age);
   }
 
   int16_t fy = H - FOOTER_H;
+  tft.fillRect(0, fy, W, FOOTER_H, ST77XX_BLACK);
   tft.drawFastHLine(0, fy, W, 0x4208);
   tft.setTextColor(0x7BEF);
-  tft.setCursor(4, fy + 5);  tft.print("ctx 62%");
-  tft.drawRect(52, fy + 5, 50, 7, 0x4208);
-  tft.fillRect(53, fy + 6, 48 * 62 / 100, 5, ST77XX_GREEN);
-  tft.setCursor(W - 4 - 6 * 8, fy + 5); tft.print("fable5.1");
-  Serial.println("layout: beacon mock drawn. 'NEEDS YOU' must be red, 'idle' green.");
+  tft.setCursor(4, fy + 5);  tft.print("ctx 41%");
+  tft.drawRect(56, fy + 5, 44, 7, 0x4208);
+  tft.fillRect(57, fy + 6, 42 * 41 / 100, 5, ST77XX_GREEN);
+  tft.setCursor(W - 4 - 6 * 5, fy + 5); tft.print("opus5");
+  Serial.println("layout: beacon mock drawn. Top row is the attention state.");
+  Serial.println("No label or age should touch. State is colour, not text.");
 }
 
 static void selfTest() {
