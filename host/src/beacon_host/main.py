@@ -18,6 +18,7 @@ import queue
 import signal
 import sys
 import time
+from pathlib import Path
 
 from . import hook_server
 from .config import Config, default_config_path
@@ -59,19 +60,28 @@ def build_config(args: argparse.Namespace) -> Config:
 
 def setup_logging(cfg: Config) -> None:
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    problem = None
     if cfg.log_file:
         # Rotating, because this runs unattended at login and nobody prunes it.
-        handlers.append(
-            logging.handlers.RotatingFileHandler(
-                cfg.log_file, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        # Create the directory: the handler will not, and a missing one takes
+        # the whole daemon down at startup over a log file, which is absurd.
+        try:
+            Path(cfg.log_file).parent.mkdir(parents=True, exist_ok=True)
+            handlers.append(
+                logging.handlers.RotatingFileHandler(
+                    cfg.log_file, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+                )
             )
-        )
+        except OSError as e:
+            problem = f"file logging disabled, cannot use {cfg.log_file}: {e}"
     logging.basicConfig(
         level=cfg.log_level.upper(),
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         handlers=handlers,
         force=True,
     )
+    if problem:
+        logging.getLogger("beacon_host").warning(problem)
 
 
 def run(cfg: Config, dry_run: bool = False) -> int:

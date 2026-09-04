@@ -174,3 +174,29 @@ def test_health_reports_event_count():
     finally:
         hook_server.set_stats()
         srv.shutdown()
+
+
+def test_logging_creates_missing_log_directory(tmp_path):
+    """A missing log directory must not take the daemon down at startup."""
+    import logging
+    from beacon_host.config import Config
+    from beacon_host.main import setup_logging
+
+    target = tmp_path / "does" / "not" / "exist" / "beacon.log"
+    setup_logging(Config(log_file=str(target)))
+    logging.getLogger("beacon_host").info("hello")
+    logging.shutdown()
+    assert target.is_file() and "hello" in target.read_text(encoding="utf-8")
+
+
+def test_logging_survives_an_unusable_log_path(tmp_path):
+    """An unusable path degrades to stderr rather than killing the process."""
+    import logging
+    from beacon_host.config import Config
+    from beacon_host.main import setup_logging
+
+    blocker = tmp_path / "afile"
+    blocker.write_text("x", encoding="utf-8")
+    setup_logging(Config(log_file=str(blocker / "nested" / "beacon.log")))
+    logging.getLogger("beacon_host").info("still alive")
+    logging.shutdown()
