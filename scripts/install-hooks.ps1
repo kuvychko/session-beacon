@@ -27,17 +27,26 @@
 param(
     [switch]$WithStatusLine,
     [switch]$Uninstall,
-    [int]$Port = 47391
+    [int]$Port = 47391,
+    # Overridable so the install/uninstall round-trip can be tested against a
+    # throwaway file instead of the settings you are currently relying on.
+    [string]$SettingsPath = (Join-Path $env:USERPROFILE ".claude\settings.json")
 )
 
 $ErrorActionPreference = "Stop"
 
-$settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
+$settingsPath = $SettingsPath
 $eventUrl  = "http://127.0.0.1:$Port/event"
 $statusUrl = "http://127.0.0.1:$Port/status"
 $curl      = "C:/Windows/System32/curl.exe"
 $eventCmd  = "$curl -s --max-time 1 --data-binary @- $eventUrl"
 $statusCmd = "$curl -s --max-time 1 --data-binary @- $statusUrl"
+
+# Installing the status line overwrites whatever was there. Stash the old one
+# in a sidecar so -Uninstall can put it back, rather than leaving the user to
+# dig it out of a timestamped backup. Kept beside settings.json, not inside
+# it, so no unrecognised key ever lands in the settings Claude Code parses.
+$stashPath = Join-Path (Split-Path $settingsPath) ".session-beacon-saved-statusline.json"
 
 # PostToolUse but not PreToolUse: one is enough for activity and staleness,
 # and skipping the other halves the cost on the busiest event.
@@ -61,10 +70,6 @@ try {
     throw "settings.json is not valid JSON; fix it before running this. ($_)"
 }
 if ($null -eq $settings) { $settings = @{} }
-
-$backup = "$settingsPath.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
-Copy-Item $settingsPath $backup
-Write-Host "Backed up to $backup"
 
 if (-not $settings.ContainsKey("hooks") -or $null -eq $settings["hooks"]) {
     $settings["hooks"] = @{}
@@ -97,6 +102,11 @@ if ($Uninstall) {
         $settings["statusLine"].command -like "*127.0.0.1:$Port*") {
         $settings.Remove("statusLine"); $changed++
         Write-Host "Removed the beacon status line."
+        if (Test-Path $stashPath) {
+            $settings["statusLine"] = Get-Content $stashPath -Raw | ConvertFrom-Json -AsHashtable
+            Remove-Item $stashPath -Force
+            Write-Host "Restored the status line you had before: $($settings['statusLine'].command)"
+        }
     }
     Write-Host "Removed $changed beacon hook entries."
 } else {
@@ -112,7 +122,13 @@ if ($Uninstall) {
     if ($WithStatusLine) {
         if ($settings.ContainsKey("statusLine") -and
             $settings["statusLine"].command -notlike "*127.0.0.1:$Port*") {
-            Write-Warning "Replacing your existing status line. The old one is in $backup."
+            # Only stash once, so re-running install does not overwrite the real
+            # original with the beacon's own line.
+            if (-not (Test-Path $stashPath)) {
+                $settings["statusLine"] | ConvertTo-Json -Depth 8 |
+                    Set-Content -Path $stashPath -Encoding utf8
+                Write-Host "Saved your existing status line; -Uninstall will put it back."
+            }
         }
         $settings["statusLine"] = @{ type = "command"; command = $statusCmd }
         Write-Host "Status line routed through the daemon."
@@ -122,12 +138,34 @@ if ($Uninstall) {
 }
 
 $json = $settings | ConvertTo-Json -Depth 12
+
+# Compare against the original re-serialised the same way, so formatting
+# differences do not register as a change. Without this, re-running either
+# direction rewrites settings.json and leaves another backup behind every time.
+$before = $original | ConvertFrom-Json -AsHashtable | ConvertTo-Json -Depth 12
+if ($json -eq $before) {
+    Write-Host ""
+    Write-Host "No changes needed; $settingsPath left untouched."
+    return
+}
+
 try { $json | ConvertFrom-Json | Out-Null } catch { throw "Refusing to write invalid JSON: $_" }
+
+# Back up only when actually changing something.
+$backup = "$settingsPath.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
+Copy-Item $settingsPath $backup
+Write-Host "Backed up to $backup"
+
 $json | Set-Content -Path $settingsPath -Encoding utf8
 
 Write-Host ""
 Write-Host "Wrote $settingsPath"
-Write-Host "Hooks load at session start, so restart your Claude Code sessions now."
-Write-Host "Then check the daemon is seeing them:"
-Write-Host "  curl.exe -s http://127.0.0.1:$Port/health"
-Write-Host "'events_received' should climb as you use Claude Code."
+if ($Uninstall) {
+    Write-Host "Hooks are read at session start, so restart your Claude Code"
+    Write-Host "sessions for the removal to take effect."
+} else {
+    Write-Host "Hooks load at session start, so restart your Claude Code sessions now."
+    Write-Host "Then check the daemon is seeing them:"
+    Write-Host "  curl.exe -s http://127.0.0.1:$Port/health"
+    Write-Host "'events_received' should climb as you use Claude Code."
+}

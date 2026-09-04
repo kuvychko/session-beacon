@@ -46,6 +46,8 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
 - A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.
+- Anything that installs outside the repo must be removable by `scripts/uninstall.ps1`. It stops the daemon, drops the Scheduled Task, strips the hooks and clears the logs, and it must stay idempotent and leave user-authored things alone. `install-hooks.ps1` takes `-SettingsPath` so the round trip can be tested against a throwaway file.
+- Neither install script writes or backs up settings.json when nothing would change, or repeat runs litter the directory with backups.
 
 ## Commands
 
@@ -59,6 +61,7 @@ uv run beacon-host --port COM4 -v    # drive the display
 curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device
 ./scripts/install-hooks.ps1          # Claude Code hooks; -Uninstall to remove
 ./scripts/install-task.ps1           # run at logon; -Uninstall to remove
+./scripts/uninstall.ps1 -WhatIf      # undo everything; supports -WhatIf
 ```
 
 Hooks are read at session start. After `install-hooks.ps1` the user must

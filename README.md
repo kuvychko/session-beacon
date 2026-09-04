@@ -61,7 +61,7 @@ firmware/tft_smoketest/   Standalone wiring/display test, flash this first
 host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Example Claude Code settings, plus a payload capture tool
-scripts/                  install-hooks.ps1 (Claude Code hooks), install-task.ps1 (run at logon)
+scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
 docs/                     Architecture, hardware, protocol, integration, roadmap
 ```
 
@@ -90,6 +90,20 @@ curl.exe -s http://127.0.0.1:47391/health   # events_received should climb
 # 4. Optional: start the daemon automatically at logon
 ./scripts/install-task.ps1
 ```
+
+To undo all of it, including the hooks, the scheduled task, the running daemon
+and the logs:
+
+```powershell
+./scripts/uninstall.ps1 -WhatIf    # show what it would touch
+./scripts/uninstall.ps1
+```
+
+Setup reaches outside this repository, so deleting the folder would leave a
+Scheduled Task, hooks in your Claude Code settings and a daemon holding a COM
+port behind. The uninstall script keeps anything it did not create: your own
+hooks, your other settings, your config file, and a status line it replaced is
+restored rather than dropped.
 
 If the display says `no sessions`, the daemon and the wiring are fine and
 Claude Code simply is not calling the hooks. Check `events_received` at
