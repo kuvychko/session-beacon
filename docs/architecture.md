@@ -40,7 +40,18 @@ The reply is composed purely from the payload just received, so the HTTP handler
 
 ## Session state machine
 
-Each session is keyed by Claude Code's `session_id`. The display label is derived from `cwd` (basename of the repo directory) with an optional override map in the host config.
+Each session is keyed by Claude Code's `session_id`.
+
+**The label is the enclosing repository, not the working directory.** `cwd` in a hook
+payload is the session's live working directory and it moves as you work. Labelling
+straight from it meant a session in this repo displayed as `host` the moment anything
+ran in `host/`, and because the label was only computed once it then stayed wrong for
+the rest of the session. The host now walks up from `cwd` to the nearest ancestor
+holding a `.git` entry and uses that name, recomputing whenever `cwd` changes. Results
+are cached, since hooks fire on every tool call and this touches the filesystem.
+
+Overrides in the host config are matched against both the exact `cwd` and the resolved
+repository root, so keying them by repo root works.
 
 ```mermaid
 stateDiagram-v2
@@ -101,7 +112,7 @@ Device discovery: `--port COMx` explicit, else auto-detect by USB VID/PID of the
 
 Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
 
-Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received` and `last_event_age_s`. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. A tray icon is a possible later addition, not phase 1.
+Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s` and `rows`, which is what is currently on the display. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. A tray icon is a possible later addition, not phase 1.
 
 ## Firmware internals
 

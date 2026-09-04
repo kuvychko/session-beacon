@@ -172,6 +172,9 @@ def run(cfg: Config, dry_run: bool = False) -> int:
                     last_event_age_s=(round(now - last_event_at, 1)
                                       if last_event_at else None),
                     uptime_s=round(now - started, 1),
+                    # What is actually on the display. Answering "why does the
+                    # screen say that" should not need a serial cable.
+                    rows=[f"{r['l']}:{r['st']}:{r['age']}s" for r in snap["s"]],
                 )
                 last_key, last_push = key, now
 

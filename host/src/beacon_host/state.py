@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from enum import Enum
 from typing import Any
 
@@ -73,6 +74,7 @@ class SessionStore:
     max_rows: int = 6
     label_overrides: dict[str, str] = field(default_factory=dict)
     sessions: dict[str, Session] = field(default_factory=dict)
+    _root_cache: dict[str, str] = field(default_factory=dict, repr=False)
 
     # ---- inputs ----
 
@@ -173,13 +175,48 @@ class SessionStore:
         if s is None:
             s = Session(session_id=sid, cwd=cwd, label=self._label(cwd), state_since=now, last_event=now)
             self.sessions[sid] = s
-        elif cwd and not s.cwd:
+        elif cwd and cwd != s.cwd:
+            # Recompute rather than keep the first value seen. A session's cwd
+            # moves as you work, and freezing the label meant a session first
+            # seen from a subdirectory was mislabelled for its whole life.
             s.cwd, s.label = cwd, self._label(cwd)
         return s
 
     def _label(self, cwd: str) -> str:
+        """Label a session by its project, not by wherever its shell happens to be.
+
+        `cwd` is the session's live working directory and moves around: a `cd`
+        into a subdirectory would otherwise relabel the row, so a repo called
+        session-beacon shows up as "host" the moment anything runs in host/.
+        Resolving to the enclosing repository keeps the name stable and matches
+        how people actually think about their sessions.
+        """
         key = cwd.replace("\\", "/").rstrip("/")
-        return self.label_overrides.get(key) or os.path.basename(key) or "?"
+        root = self._project_root(key)
+        for candidate in (key, root):
+            if candidate and candidate in self.label_overrides:
+                return self.label_overrides[candidate]
+        return os.path.basename(root or key) or "?"
+
+    def _project_root(self, key: str) -> str:
+        """Nearest ancestor holding a .git entry, or "" if there is none.
+
+        Cached: hooks fire on every tool call and this touches the filesystem.
+        A worktree's .git is a file rather than a directory, so test existence.
+        """
+        if key in self._root_cache:
+            return self._root_cache[key]
+        root = ""
+        p = Path(key)
+        for cand in (p, *p.parents):
+            try:
+                if (cand / ".git").exists():
+                    root = str(cand).replace("\\", "/").rstrip("/")
+                    break
+            except OSError:
+                break
+        self._root_cache[key] = root
+        return root
 
     @staticmethod
     def _row(s: Session, now: float) -> dict[str, Any]:

@@ -36,7 +36,10 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - `loop()` drains serial *before* taking `now`. Parsing repaints the screen and stamps `lastMsgMs` afterwards, so a `now` taken earlier would be in the past.
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
-- Session labels are derived from `cwd` basename; overrides go in `host/config.local.toml`, not in code.
+- Session labels are the enclosing git repository's name, not the `cwd` basename. `cwd`
+  moves as a session works and labelling from it directly mislabels any session that
+  runs in a subdirectory. Overrides go in `host/config.local.toml` or `host/config.toml`,
+  keyed by repo root or exact cwd, not in code.
 - Hook forwarding is done by Windows' built-in `curl.exe`, not a Python script, because process startup dominates hook cost. Do not "simplify" the hook commands back to a script without re-measuring.
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.

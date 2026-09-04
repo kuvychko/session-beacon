@@ -116,3 +116,53 @@ def test_permission_mode_captured():
     st = SessionStore()
     st.apply_event(ev("SessionStart", permission_mode="bypassPermissions"), 0)
     assert st.sessions["abc12345-0000"].permission_mode == "bypassPermissions"
+
+
+def test_label_uses_repo_root_not_transient_cwd(tmp_path):
+    """A session's cwd moves as you work. Labelling from it directly meant a
+    repo called session-beacon displayed as "host" the moment anything ran in
+    its host/ subdirectory, and the wrong label then stuck for the session's
+    whole life."""
+    repo = tmp_path / "session-beacon"
+    (repo / ".git").mkdir(parents=True)
+    sub = repo / "host" / "src"
+    sub.mkdir(parents=True)
+
+    st = SessionStore()
+    st.apply_event(ev("PostToolUse", cwd=str(sub)), 0)
+    assert st.snapshot(1)["s"][0]["l"] == "session-beacon"
+
+    # Moving back up must not change it either.
+    st.apply_event(ev("PostToolUse", cwd=str(repo)), 2)
+    assert st.snapshot(3)["s"][0]["l"] == "session-beacon"
+
+
+def test_label_updates_when_the_session_changes_repo(tmp_path):
+    a, b = tmp_path / "alpha", tmp_path / "beta"
+    (a / ".git").mkdir(parents=True)
+    (b / ".git").mkdir(parents=True)
+    st = SessionStore()
+    st.apply_event(ev("PostToolUse", cwd=str(a)), 0)
+    assert st.snapshot(1)["s"][0]["l"] == "alpha"
+    st.apply_event(ev("PostToolUse", cwd=str(b)), 2)
+    assert st.snapshot(3)["s"][0]["l"] == "beta"
+
+
+def test_label_falls_back_to_basename_outside_a_repo(tmp_path):
+    plain = tmp_path / "just-a-folder"
+    plain.mkdir()
+    st = SessionStore()
+    st.apply_event(ev("PostToolUse", cwd=str(plain)), 0)
+    assert st.snapshot(1)["s"][0]["l"] == "just-a-folder"
+
+
+def test_label_override_matches_repo_root_or_exact_cwd(tmp_path):
+    repo = tmp_path / "factory-dynamics-research"
+    (repo / ".git").mkdir(parents=True)
+    sub = repo / "sim"
+    sub.mkdir()
+    root_key = str(repo).replace("\\", "/")
+
+    st = SessionStore(label_overrides={root_key: "fd-research"})
+    st.apply_event(ev("PostToolUse", cwd=str(sub)), 0)
+    assert st.snapshot(1)["s"][0]["l"] == "fd-research"
