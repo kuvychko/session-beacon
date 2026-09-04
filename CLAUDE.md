@@ -38,7 +38,16 @@ uv run pytest
 uv run beacon-host --port COM5 --log-level DEBUG
 ```
 
-Firmware is built and flashed from the Arduino IDE. There is no CLI build yet.
+Firmware builds headlessly with the arduino-cli bundled inside the Arduino IDE install. Compile before handing firmware over; it catches real problems, such as `LINE_MAX` colliding with a POSIX macro from limits.h.
+
+```powershell
+$cli = "$env:LOCALAPPDATA\Programs\Arduino IDEesourcespp\libackendesourcesrduino-cli.exe"
+& $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
+& $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
+& $cli board list        # find the port if COM4 has moved
+```
+
+Required libraries are installed: Adafruit GFX 1.12.4, Adafruit ST7735/ST7789 1.11.0, ArduinoJson 7.4.3.
 
 ## Do not
 

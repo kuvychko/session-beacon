@@ -55,7 +55,7 @@ static void applyPanelColorOrder() {
 static constexpr const char* FW_VERSION = "0.1.0";
 static constexpr uint8_t  PROTOCOL_V    = 1;
 static constexpr uint32_t BAUD          = 115200;
-static constexpr size_t   LINE_MAX      = 1024;
+static constexpr size_t   LINE_BUF      = 1024;
 static constexpr uint32_t NO_HOST_MS    = 10000;
 static constexpr uint32_t BLINK_MS      = 500;
 static constexpr uint32_t HEARTBEAT_MS  = 10000;
@@ -141,7 +141,7 @@ RowView   shownRows[MAX_ROWS];
 HeaderView shownHeader;
 FooterView shownFooter;
 
-char lineBuf[LINE_MAX + 1];
+char lineBuf[LINE_BUF + 1];
 size_t lineLen = 0;
 uint32_t lastMsgMs = 0;
 uint32_t lastBlinkMs = 0;
@@ -445,7 +445,7 @@ void loop() {
         else                   handleCommand(lineBuf);
         lineLen = 0;
       }
-    } else if (lineLen < LINE_MAX) {
+    } else if (lineLen < LINE_BUF) {
       lineBuf[lineLen++] = c;
     } else {
       lineLen = 0;  // overflow: drop the line

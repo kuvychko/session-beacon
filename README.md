@@ -74,6 +74,6 @@ docs/                     Architecture, hardware, protocol, integration, roadmap
 # 2. Install and run the host
 cd host
 uv sync
-uv run beacon-host --port COM5
+uv run beacon-host --port COM4
 # 3. Merge hooks/settings.example.json into ~/.claude/settings.json
 ```
