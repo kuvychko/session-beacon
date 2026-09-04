@@ -25,6 +25,10 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - Firmware uses Arduino pin names (`D10`), never raw GPIO numbers. Wiring is in `docs/hardware.md` and matches the `env_monitoring` project at `C:\Repos\env_monitoring`.
 - The display panel is BGR-wired, so `applyPanelColorOrder()` must run after every `setRotation()` call. Without it red and blue render swapped. This is a per-unit trait, not a property of the part number, and `env_monitoring` does not need it. Do not "clean up" that register write.
 - Firmware is dumb: it renders what the host sends. Do not add policy (sorting, thresholds, labels) to the firmware.
+- The firmware drives the TFT over hardware SPI at 24 MHz, chosen by the 3-argument
+  Adafruit_ST7735 constructor. `USE_HARDWARE_SPI 0` reverts to bit-banging the same
+  pins. If the picture ever shows speckles or tearing, lower `SPI_HZ` before
+  suspecting anything else.
 - In firmware, never clear a region and then draw text into it. Use fixed-width fields
   at fixed positions with `setTextColor(fg, bg)` so glyphs overwrite themselves. Software
   SPI is slow enough that clear-then-draw is a visible flash on every update.

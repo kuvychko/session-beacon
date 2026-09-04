@@ -26,7 +26,26 @@
 #define TFT_MOSI  D11
 #define TFT_SCLK  D13
 
+// Hardware SPI. D11 and D13 are this board's MOSI and SCK, confirmed in the
+// variant's pins_arduino.h, so the display is already on the pins the SPI
+// peripheral drives and this is a constructor change with no rewiring.
+//
+// The three-argument constructor selects the peripheral; the five-argument one
+// names MOSI and SCK explicitly and makes the library bit-bang them instead.
+// Set USE_HARDWARE_SPI to 0 to go back, which is the whole revert.
+#define USE_HARDWARE_SPI 1
+
+// The library defaults to 32 MHz. That is optimistic for an ST7735S on jumper
+// wires, and the failure is cosmetic but confusing: speckled pixels or a
+// scrambled frame rather than a clean failure. 24 MHz is still roughly fifteen
+// times faster than bit-banging. Lower this first if the picture is dirty.
+static constexpr uint32_t SPI_HZ = 24000000;
+
+#if USE_HARDWARE_SPI
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+#else
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+#endif
 
 // ---- Panel colour order ----
 //
@@ -531,6 +550,9 @@ void setup() {
   Serial.setRxBufferSize(4096);  // must precede begin(); default is far smaller
   Serial.begin(BAUD);
   tft.initR(INITR_GREENTAB);
+#if USE_HARDWARE_SPI
+  tft.setSPISpeed(SPI_HZ);
+#endif
   tft.setRotation(1);      // landscape 160x128
   applyPanelColorOrder();  // must follow setRotation, see note above
   drawNoHost();
@@ -589,10 +611,16 @@ void loop() {
     lastHbMs = now;
     int32_t since = (int32_t)(now - lastMsgMs);
     if (since < 0) since = 0;
-    Serial.printf("{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"since\":%ld,\"render\":%lu}\n",
+    Serial.printf("{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\"}\n",
                   FW_VERSION, (unsigned long)(now / 1000),
                   (unsigned long)rxLines, (unsigned long)rxBad,
                   (unsigned long)rxDropped, (long)since,
-                  (unsigned long)lastRenderMs);
+                  (unsigned long)lastRenderMs,
+#if USE_HARDWARE_SPI
+                  "hw"
+#else
+                  "sw"
+#endif
+                  );
   }
 }

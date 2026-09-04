@@ -58,7 +58,29 @@ applyPanelColorOrder();      // this panel is BGR-wired, see below
 
 `INITR_GREENTAB` is not a guess to tune. `env_monitoring` established that this panel is an ST7735**S**, and the ST7735 (`BLACKTAB`) and ST7735R (`REDTAB`) gamma and offset tables produce shifted images or wrong colours on it. Bench testing confirmed the offsets and rotation are correct with `GREENTAB`.
 
-The 5-argument constructor is **software SPI**, chosen in `env_monitoring` for reliability. The beacon redraws even less often than the IAQ dashboard, so it stays. If flicker or slowness appears, the hardware SPI constructor `Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST)` is a drop-in: D11 and D13 are already the Nano ESP32's hardware SPI pins, so no rewiring is needed.
+### Hardware SPI
+
+The firmware uses **hardware SPI**, selected by the 3-argument constructor. The
+5-argument form names MOSI and SCK explicitly, which is the library's signal to
+bit-bang those pins instead. `USE_HARDWARE_SPI` in `beacon.ino` switches between
+them and is the whole revert.
+
+No rewiring was needed. The variant header for this board defines `MOSI` as `D11`
+and `SCK` as `D13`, exactly where the display was already wired, so the sketch had
+been bit-banging pins that can clock themselves.
+
+Measured on this panel, same scenes before and after:
+
+| Case | Software SPI | Hardware SPI at 24 MHz |
+|------|--------------|------------------------|
+| One row's elapsed time ticking | 28 ms | about 2 ms |
+| Five rows plus a moving footer bar | ~140 ms extrapolated | 11 ms |
+| Full-screen repaint | 900 ms | 140 ms |
+
+The clock is set to 24 MHz rather than the library's 32 MHz default. An ST7735S on
+jumper wires is not guaranteed at 32 MHz, and the failure is cosmetic and confusing
+rather than clean: speckled pixels or a torn frame, not a blank screen. Lower
+`SPI_HZ` first if the picture is ever dirty.
 
 ### Panel colour order
 
