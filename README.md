@@ -57,6 +57,7 @@ Scoping and skeleton only. Nothing has been flashed or run yet. See [docs/roadma
 
 ```
 firmware/beacon/          Arduino sketch for the Nano ESP32 (Arduino IDE, Adafruit_ST7735)
+firmware/tft_smoketest/   Standalone wiring/display test, flash this first
 host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Hook forwarder script + example Claude Code settings snippet
@@ -68,6 +69,7 @@ docs/                     Architecture, hardware, protocol, integration, roadmap
 ## Quick start (target, not yet working)
 
 ```powershell
+# 0. Wire the display per docs/hardware.md, then flash firmware/tft_smoketest to check it
 # 1. Flash firmware/beacon/beacon.ino from the Arduino IDE (board: Arduino Nano ESP32)
 # 2. Install and run the host
 cd host
