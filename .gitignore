@@ -15,6 +15,7 @@ firmware/**/build/
 
 # Local config
 host/config.local.toml
+host/config.toml
 *.log
 
 # OS / editor

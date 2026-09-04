@@ -30,6 +30,8 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - Session labels are derived from `cwd` basename; overrides go in `host/config.local.toml`, not in code.
 - Hook forwarding is done by Windows' built-in `curl.exe`, not a Python script, because process startup dominates hook cost. Do not "simplify" the hook commands back to a script without re-measuring.
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
+- The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
+- A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.
 
 ## Commands
 
@@ -40,16 +42,18 @@ uv run pytest
 uv run beacon-host --dry-run -v      # print snapshots, no hardware needed
 uv run beacon-host --port COM4 -v    # drive the display
 
-curl.exe -s http://127.0.0.1:47391/health
+curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device
+./scripts/install-hooks.ps1          # Claude Code hooks; -Uninstall to remove
 ./scripts/install-task.ps1           # run at logon; -Uninstall to remove
 ```
+
+Hooks are read at session start. After `install-hooks.ps1` the user must
+restart their Claude Code sessions or nothing will arrive.
 
 Firmware builds headlessly with the arduino-cli bundled inside the Arduino IDE install. Compile before handing firmware over; it catches real problems, such as `LINE_MAX` colliding with a POSIX macro from limits.h.
 
 ```powershell
-$cli = "$env:LOCALAPPDATA\Programs\Arduino IDE
-esourcespp\libackend
-esourcesrduino-cli.exe"
+$cli = "$env:LOCALAPPDATA/Programs/Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe"
 & $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
 & $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
 & $cli board list        # find the port if COM4 has moved

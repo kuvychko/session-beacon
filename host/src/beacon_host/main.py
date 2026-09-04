@@ -96,6 +96,7 @@ def run(cfg: Config, dry_run: bool = False) -> int:
                   cfg.http_port, e)
         return 1
     log.info("listening on 127.0.0.1:%d", cfg.http_port)
+    log.info("config: %s", cfg.source or "none found, using defaults")
 
     store = SessionStore(
         stale_after_s=cfg.stale_after_s,
@@ -108,6 +109,10 @@ def run(cfg: Config, dry_run: bool = False) -> int:
 
     last_key: str | None = None
     last_push = 0.0
+    events_received = 0
+    last_event_at: float | None = None
+    warned_no_events = False
+    started = time.time()
     try:
         while not stopping:
             now = time.time()
@@ -121,9 +126,22 @@ def run(cfg: Config, dry_run: bool = False) -> int:
                     log.debug("event %s %s", payload.get("hook_event_name"),
                               payload.get("session_id", "")[:8])
                     store.apply_event(payload, now)
+                    events_received += 1
+                    last_event_at = now
                 else:
                     store.apply_status(payload, now)
                 changed = True
+
+            # Silence here almost always means the hooks were never added to
+            # settings.json, which otherwise presents as "the display is blank"
+            # and sends people looking at the wiring instead.
+            if not warned_no_events and events_received == 0 and now - started > 60:
+                warned_no_events = True
+                log.warning(
+                    "no hook events in %ds. Claude Code is probably not "
+                    "configured: run scripts/install-hooks.ps1, then restart "
+                    "your Claude Code sessions so the hooks load.",
+                    int(now - started))
 
             store.tick(now)
             snap = store.snapshot(now)
@@ -138,6 +156,13 @@ def run(cfg: Config, dry_run: bool = False) -> int:
                     for ln in link.read_lines():
                         log.debug("device: %s", ln)
                     hook_server.set_device_ok(link.connected)
+                hook_server.set_stats(
+                    sessions=len(store.sessions),
+                    events_received=events_received,
+                    last_event_age_s=(round(now - last_event_at, 1)
+                                      if last_event_at else None),
+                    uptime_s=round(now - started, 1),
+                )
                 last_key, last_push = key, now
 
             time.sleep(TICK_S)

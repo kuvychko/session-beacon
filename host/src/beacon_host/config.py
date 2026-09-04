@@ -19,6 +19,7 @@ class Config:
     log_file: str | None = None       # None means stderr only
     log_level: str = "INFO"
     labels: dict[str, str] = field(default_factory=dict)
+    source: Path | None = None        # which file this came from, for logging
 
     @classmethod
     def load(cls, path: str | Path | None) -> "Config":
@@ -29,6 +30,7 @@ class Config:
         p = Path(path)
         if not p.is_file():
             return cfg
+        cfg.source = p
         with p.open("rb") as f:
             raw = tomllib.load(f)
 
@@ -44,6 +46,16 @@ class Config:
         return cfg
 
 
-def default_config_path() -> Path:
-    """config.local.toml beside the package's project root, if it exists."""
-    return Path(__file__).resolve().parents[2] / "config.local.toml"
+#  config.toml is listed because it is the name people reach for first, and
+#  silently ignoring it looks exactly like the daemon ignoring your settings.
+CONFIG_NAMES = ("config.local.toml", "config.toml")
+
+
+def default_config_path() -> Path | None:
+    """First recognised config file in the host project root, if any."""
+    root = Path(__file__).resolve().parents[2]
+    for name in CONFIG_NAMES:
+        p = root / name
+        if p.is_file():
+            return p
+    return None

@@ -129,3 +129,48 @@ def test_full_pipeline_produces_snapshot():
     assert snap["cost"] == 1.23
     assert all(len(r["l"]) <= 16 for r in snap["s"])
     assert len(json.dumps(snap, separators=(",", ":")).encode()) < 1024
+
+
+def test_default_config_accepts_either_filename(tmp_path, monkeypatch):
+    """config.toml is the name people reach for first; ignoring it silently
+    looks exactly like the daemon ignoring your settings."""
+    from beacon_host import config as cfgmod
+
+    root = tmp_path
+    monkeypatch.setattr(cfgmod, "default_config_path",
+                        lambda: next((root / n for n in cfgmod.CONFIG_NAMES
+                                      if (root / n).is_file()), None))
+    assert cfgmod.default_config_path() is None
+
+    (root / "config.toml").write_text('port = "COM7"\n', encoding="utf-8")
+    p = cfgmod.default_config_path()
+    assert p is not None and p.name == "config.toml"
+    assert cfgmod.Config.load(p).port == "COM7"
+
+    # config.local.toml takes precedence when both exist.
+    (root / "config.local.toml").write_text('port = "COM8"\n', encoding="utf-8")
+    p = cfgmod.default_config_path()
+    assert p.name == "config.local.toml"
+    assert cfgmod.Config.load(p).port == "COM8"
+    assert cfgmod.Config.load(p).source == p
+
+
+def test_health_reports_event_count():
+    """events_received is what distinguishes 'hooks not installed' from a
+    daemon or wiring fault, so it has to be visible without a debugger."""
+    q = queue.Queue()
+    srv = hook_server.start(q, port=47457)
+    try:
+        hook_server.set_device_ok(True)
+        hook_server.set_stats(sessions=0, events_received=0, last_event_age_s=None)
+        with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
+            h = json.loads(r.read())
+        assert h["events_received"] == 0 and h["sessions"] == 0 and h["device"] is True
+
+        hook_server.set_stats(sessions=2, events_received=17, last_event_age_s=0.4)
+        with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
+            h = json.loads(r.read())
+        assert h["events_received"] == 17 and h["sessions"] == 2
+    finally:
+        hook_server.set_stats()
+        srv.shutdown()

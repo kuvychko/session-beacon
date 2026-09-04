@@ -61,7 +61,7 @@ firmware/tft_smoketest/   Standalone wiring/display test, flash this first
 host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Example Claude Code settings, plus a payload capture tool
-scripts/                  install-task.ps1, registers the daemon to run at logon
+scripts/                  install-hooks.ps1 (Claude Code hooks), install-task.ps1 (run at logon)
 docs/                     Architecture, hardware, protocol, integration, roadmap
 ```
 
@@ -82,9 +82,15 @@ cd host; uv sync
 uv run beacon-host --dry-run -v      # sanity check without the board
 uv run beacon-host                   # auto-detects the board by USB id
 
-# 3. Merge hooks/settings.example.json into ~/.claude/settings.json, then
-#    restart your Claude Code sessions so the hooks take effect.
+# 3. Install the Claude Code hooks, then RESTART your Claude Code sessions.
+#    Without this the daemon runs happily and reports zero sessions forever.
+./scripts/install-hooks.ps1              # -WithStatusLine for cost and context
+curl.exe -s http://127.0.0.1:47391/health   # events_received should climb
 
-# 4. Optional: start it automatically at logon
+# 4. Optional: start the daemon automatically at logon
 ./scripts/install-task.ps1
 ```
+
+If the display says `no sessions`, the daemon and the wiring are fine and
+Claude Code simply is not calling the hooks. Check `events_received` at
+`/health`, then re-run `install-hooks.ps1` and restart your sessions.

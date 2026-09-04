@@ -25,8 +25,9 @@ MAX_BODY = 1 << 20  # 1 MiB; statusline payloads are small, cap the rest
 
 
 class _Handler(BaseHTTPRequestHandler):
-    q: queue.Queue          # set by start()
+    q: queue.Queue           # set by start()
     device_ok: bool = False  # updated by the main loop, read here
+    stats: dict = {}         # ditto; whole-dict replacement keeps this atomic
 
     protocol_version = "HTTP/1.1"
 
@@ -70,7 +71,11 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             self._send(404)
             return
-        body = json.dumps({"ok": True, "device": type(self).device_ok}).encode()
+        # events_received is the field that matters when nothing shows on the
+        # display: zero means Claude Code is not calling the hooks at all,
+        # which is a settings problem, not a daemon or wiring problem.
+        cls = type(self)
+        body = json.dumps({"ok": True, "device": cls.device_ok, **cls.stats}).encode()
         self._send(200, body, "application/json")
 
     def log_message(self, *args) -> None:  # silence default stderr logging
@@ -88,3 +93,8 @@ def start(q: queue.Queue, host: str = HOST, port: int = PORT) -> ThreadingHTTPSe
 def set_device_ok(ok: bool) -> None:
     """Called from the main loop. A plain attribute write, atomic under the GIL."""
     _Handler.device_ok = ok
+
+
+def set_stats(**kwargs) -> None:
+    """Replace the /health extras. Whole-dict swap, so readers never tear."""
+    _Handler.stats = dict(kwargs)

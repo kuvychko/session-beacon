@@ -149,6 +149,7 @@ uint32_t lastBlinkMs = 0;
 uint32_t lastHbMs = 0;
 bool blinkOn = true;
 bool showingNoHost = false;
+bool shownEmpty = false;
 bool demoMode = false;
 
 // ---- Helpers ----
@@ -184,7 +185,32 @@ static void printRight(int16_t rightX, int16_t y, const char* s) {
 static void invalidateAll() {
   shownHeader.valid = false;
   shownFooter.valid = false;
+  shownEmpty = false;
   for (uint8_t i = 0; i < MAX_ROWS; i++) shownRows[i] = RowView();
+}
+
+// A connected host with zero sessions used to render as an empty screen, which
+// is indistinguishable from a broken setup. Say so instead: the overwhelmingly
+// likely cause is that the Claude Code hooks were never installed.
+static void updateEmptyNotice() {
+  bool empty = (snap.count == 0);
+  if (empty == shownEmpty) return;
+
+  const int16_t y = ROWS_Y, h = FOOTER_Y - ROWS_Y;
+  tft.fillRect(0, y, W, h, C_BG);
+  for (uint8_t i = 0; i < MAX_ROWS; i++) shownRows[i] = RowView();
+
+  if (empty) {
+    tft.setTextSize(2);
+    tft.setTextColor(C_MUTED);
+    tft.setCursor(14, y + h / 2 - 16);
+    tft.print("no sessions");
+    tft.setTextSize(1);
+    tft.setTextColor(C_GRID);
+    tft.setCursor(14, y + h / 2 + 8);
+    tft.print("host ok. hooks set up?");
+  }
+  shownEmpty = empty;
 }
 
 // ---- Rendering ----
@@ -341,6 +367,7 @@ static void render() {
     invalidateAll();
   }
   drawHeader();
+  updateEmptyNotice();  // must precede the rows: it repaints their whole area
   for (uint8_t i = 0; i < snap.count; i++) drawRow(i);
   for (uint8_t i = snap.count; i < MAX_ROWS; i++) clearRow(i);
   drawFooter();

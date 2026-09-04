@@ -101,7 +101,7 @@ Device discovery: `--port COMx` explicit, else auto-detect by USB VID/PID of the
 
 Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
 
-Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected. A tray icon is a possible later addition, not phase 1.
+Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received` and `last_event_age_s`. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. A tray icon is a possible later addition, not phase 1.
 
 ## Firmware internals
 
@@ -109,6 +109,7 @@ Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Ta
 - `Serial` (USB CDC) at 115200. Reads until newline, parses with a fixed-size ArduinoJson document (2 KB is plenty for 6 sessions).
 - Repaints only changed regions, tracking what the header, each row, and the footer currently show. Software SPI makes a full repaint visible as a sweep, and the host resends a snapshot every second to advance timers, so this is not a premature optimisation.
 - Shows a "no host" screen if nothing arrives for 10 s, so an unplugged or dead daemon is obvious.
+- Shows a "no sessions" screen when the host is connected but reports nothing. These two failures have completely different causes and used to look identical: an empty screen. In practice "no sessions" means the Claude Code hooks were never installed, so the notice says so.
 - Optional heartbeat back to host so the host can log device presence.
 - Accepts local commands on the same serial line so the layout can be exercised without a host. A line starting with `{` is a protocol message; anything else is a command, and `demo` loads a canned snapshot with running timers.
 
