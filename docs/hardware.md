@@ -77,6 +77,11 @@ Measured on this panel, same scenes before and after:
 | Five rows plus a moving footer bar | ~140 ms extrapolated | 11 ms |
 | Full-screen repaint | 900 ms | 140 ms |
 
+Verified on hardware: the picture is clean at 24 MHz, with no speckling or
+tearing, colours correct, the attention row pulsing and the footer bar sliding
+smoothly. Timings and receive counters cannot show any of that, so this needed a
+human looking at the panel.
+
 The clock is set to 24 MHz rather than the library's 32 MHz default. An ST7735S on
 jumper wires is not guaranteed at 32 MHz, and the failure is cosmetic and confusing
 rather than clean: speckled pixels or a torn frame, not a blank screen. Lower
