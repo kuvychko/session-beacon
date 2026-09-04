@@ -107,11 +107,24 @@ Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Ta
 
 - Single sketch, Arduino IDE, same libraries as `env_monitoring` (Adafruit_GFX, Adafruit_ST7735) plus ArduinoJson.
 - `Serial` (USB CDC) at 115200. Reads until newline, parses with a fixed-size ArduinoJson document (2 KB is plenty for 6 sessions).
-- Repaints only changed regions, tracking what the header, each row, and the footer currently show. Software SPI makes a full repaint visible as a sweep, and the host resends a snapshot every second to advance timers, so this is not a premature optimisation.
+- Repaints only changed regions, tracking what the header, each row, and the footer currently show. Measured on this panel over software SPI, a full-screen repaint costs about 900 ms and a two-row update about 100 ms. Since the host resends a snapshot every second purely to advance timers, repainting everything would leave the device permanently mid-sweep, so this is not a premature optimisation. Hardware SPI would cut both figures by roughly an order of magnitude and needs no rewiring, but the partial-update path is already fast enough that it has not been worth the risk of changing.
+- **All timer comparisons go through `elapsed(now, since, ms)`, which uses a signed difference.** See the timing note below; a plain unsigned `now - then` caused a real and confusing bug.
 - Shows a "no host" screen if nothing arrives for 10 s, so an unplugged or dead daemon is obvious.
 - Shows a "no sessions" screen when the host is connected but reports nothing. These two failures have completely different causes and used to look identical: an empty screen. In practice "no sessions" means the Claude Code hooks were never installed, so the notice says so.
 - Optional heartbeat back to host so the host can log device presence.
 - Accepts local commands on the same serial line so the layout can be exercised without a host. A line starting with `{` is a protocol message; anything else is a command, and `demo` loads a canned snapshot with running timers.
+- Reports counters in its heartbeat: lines received, parse failures, dropped lines, milliseconds since the last accepted message, and the last render duration. These exist because a quiet host and a device that is dropping or failing to parse lines look identical from the outside, namely a screen reading "no host".
+
+### Timing: never subtract unsigned millis directly
+
+The device alternated between the correct screen and "no host" roughly once a second. The cause was a stale timestamp, not the link.
+
+`loop()` captured `now = millis()` at the top, then drained the serial buffer. Parsing a snapshot repaints the screen, which takes up to 900 ms, and `parseMessage()` stamps `lastMsgMs` when it finishes. So `lastMsgMs` ended up several hundred milliseconds *ahead* of `now`, and the staleness check `now - lastMsgMs > NO_HOST_MS` underflowed to about 4.3 billion. That is greater than every timeout, so the device painted "no host" directly over the frame it had just drawn correctly.
+
+Two changes, both worth keeping:
+
+- `loop()` reads serial first and takes `now` afterwards, so timestamps set during parsing are never in the future.
+- Every timer comparison uses `elapsed(now, since, ms)`, which casts the difference to `int32_t`. That is wrap-safe across the 49-day `millis()` rollover and simply returns false if a timestamp is briefly ahead, rather than firing the timeout. The rollover would have caused the same failure once every seven weeks.
 
 ## Screen layout (160x128 landscape)
 

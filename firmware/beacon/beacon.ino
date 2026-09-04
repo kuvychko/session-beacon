@@ -58,7 +58,7 @@ static constexpr uint32_t BAUD          = 115200;
 static constexpr size_t   LINE_BUF      = 1024;
 static constexpr uint32_t NO_HOST_MS    = 10000;
 static constexpr uint32_t BLINK_MS      = 500;
-static constexpr uint32_t HEARTBEAT_MS  = 10000;
+static constexpr uint32_t HEARTBEAT_MS  = 3000;
 static constexpr uint8_t  MAX_ROWS      = 6;
 
 static constexpr int16_t W = 160, H = 128;
@@ -152,6 +152,13 @@ bool showingNoHost = false;
 bool shownEmpty = false;
 bool demoMode = false;
 
+// Receive counters, reported in the heartbeat. Without these, a host that
+// has gone quiet and a device that is dropping or failing to parse lines
+// look identical from the outside: a screen that says 'no host'.
+uint32_t rxLines = 0;    // complete lines seen
+uint32_t rxBad = 0;      // lines that failed to parse as JSON
+uint32_t rxDropped = 0;  // lines abandoned for exceeding the buffer
+
 // ---- Helpers ----
 static uint16_t stateColor(const char* st) {
   if (!strcmp(st, "work"))  return C_WORK;
@@ -164,6 +171,15 @@ static uint16_t stateColor(const char* st) {
 }
 
 static bool isNeed(const char* st) { return !strcmp(st, "need"); }
+
+// Every timer comparison goes through this. A signed difference is safe
+// across the 49-day millis() rollover, and safe when a stored timestamp is
+// briefly *ahead* of the reference time. Plain `now - then` is neither: it
+// underflows to about 4.3 billion, which compares greater than every
+// timeout and fires it immediately.
+static inline bool elapsed(uint32_t now, uint32_t since, uint32_t ms) {
+  return (int32_t)(now - since) >= (int32_t)ms;
+}
 
 static void fmtAge(uint32_t s, char* out, size_t n) {
   if (s < 60)        snprintf(out, n, "%lus", (unsigned long)s);
@@ -360,7 +376,10 @@ static void drawFooter() {
   copyStr(shownFooter.model, sizeof shownFooter.model, model);
 }
 
+uint32_t lastRenderMs = 0;  // duration of the most recent render(), ms
+
 static void render() {
+  uint32_t t0 = millis();
   if (showingNoHost) {
     tft.fillScreen(C_BG);
     showingNoHost = false;
@@ -371,15 +390,16 @@ static void render() {
   for (uint8_t i = 0; i < snap.count; i++) drawRow(i);
   for (uint8_t i = snap.count; i < MAX_ROWS; i++) clearRow(i);
   drawFooter();
+  lastRenderMs = millis() - t0;
 }
 
 // ---- Parsing ----
 static bool parseMessage(const char* line) {
   JsonDocument doc;
-  if (deserializeJson(doc, line)) return false;
+  if (deserializeJson(doc, line)) { rxBad++; return false; }
 
   const char* t = doc["t"];
-  if (!t) return false;
+  if (!t) { rxBad++; return false; }
   lastMsgMs = millis();
 
   if (!strcmp(t, "hello")) return true;
@@ -457,6 +477,7 @@ static void handleCommand(const char* cmd) {
 
 // ---- Arduino ----
 void setup() {
+  Serial.setRxBufferSize(4096);  // must precede begin(); default is far smaller
   Serial.begin(BAUD);
   tft.initR(INITR_GREENTAB);
   tft.setRotation(1);      // landscape 160x128
@@ -466,13 +487,17 @@ void setup() {
 }
 
 void loop() {
-  uint32_t now = millis();
-
+  // Read serial BEFORE taking the time. Parsing a snapshot repaints the
+  // screen, which is slow, and parseMessage() stamps lastMsgMs afterwards.
+  // A `now` captured up here would then be behind lastMsgMs and underflow
+  // the staleness check, painting "no host" straight over the frame that
+  // had just been drawn correctly.
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
       if (lineLen) {
         lineBuf[lineLen] = 0;
+        rxLines++;
         if (lineBuf[0] == '{') parseMessage(lineBuf);
         else                   handleCommand(lineBuf);
         lineLen = 0;
@@ -480,12 +505,15 @@ void loop() {
     } else if (lineLen < LINE_BUF) {
       lineBuf[lineLen++] = c;
     } else {
-      lineLen = 0;  // overflow: drop the line
+      lineLen = 0;
+      rxDropped++;  // line longer than the buffer; abandoned
     }
   }
 
+  const uint32_t now = millis();
+
   // Pulse rows that need attention.
-  if (now - lastBlinkMs >= BLINK_MS) {
+  if (elapsed(now, lastBlinkMs, BLINK_MS)) {
     lastBlinkMs = now;
     blinkOn = !blinkOn;
     if (snap.valid && !showingNoHost) {
@@ -495,19 +523,25 @@ void loop() {
   }
 
   // Demo mode advances its own timers so the layout can be watched live.
-  if (demoMode && now - lastMsgMs >= 1000) {
+  if (demoMode && elapsed(now, lastMsgMs, 1000)) {
     lastMsgMs = now;
     for (uint8_t i = 0; i < snap.count; i++) snap.s[i].age++;
     render();
   }
 
-  if (!demoMode && !showingNoHost && now - lastMsgMs > NO_HOST_MS) {
+  if (!demoMode && !showingNoHost && elapsed(now, lastMsgMs, NO_HOST_MS)) {
     drawNoHost();
     showingNoHost = true;
   }
 
-  if (now - lastHbMs >= HEARTBEAT_MS) {
+  if (elapsed(now, lastHbMs, HEARTBEAT_MS)) {
     lastHbMs = now;
-    Serial.printf("{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu}\n", FW_VERSION, (unsigned long)(now / 1000));
+    int32_t since = (int32_t)(now - lastMsgMs);
+    if (since < 0) since = 0;
+    Serial.printf("{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"since\":%ld,\"render\":%lu}\n",
+                  FW_VERSION, (unsigned long)(now / 1000),
+                  (unsigned long)rxLines, (unsigned long)rxBad,
+                  (unsigned long)rxDropped, (long)since,
+                  (unsigned long)lastRenderMs);
   }
 }

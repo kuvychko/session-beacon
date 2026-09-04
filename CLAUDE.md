@@ -25,6 +25,8 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - Firmware uses Arduino pin names (`D10`), never raw GPIO numbers. Wiring is in `docs/hardware.md` and matches the `env_monitoring` project at `C:\Repos\env_monitoring`.
 - The display panel is BGR-wired, so `applyPanelColorOrder()` must run after every `setRotation()` call. Without it red and blue render swapped. This is a per-unit trait, not a property of the part number, and `env_monitoring` does not need it. Do not "clean up" that register write.
 - Firmware is dumb: it renders what the host sends. Do not add policy (sorting, thresholds, labels) to the firmware.
+- In firmware, never write `now - then >= TIMEOUT` on `millis()` values. Use `elapsed(now, since, ms)`. Unsigned subtraction underflows to ~4.3 billion when the stored stamp is ahead of `now`, which fires every timeout at once; it also breaks on the 49-day rollover. This caused the display to alternate with "no host" once a second.
+- `loop()` drains serial *before* taking `now`. Parsing repaints the screen and stamps `lastMsgMs` afterwards, so a `now` taken earlier would be in the past.
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
 - Session labels are derived from `cwd` basename; overrides go in `host/config.local.toml`, not in code.

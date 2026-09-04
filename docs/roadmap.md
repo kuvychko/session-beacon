@@ -15,6 +15,7 @@ Goal: the screen shows real session states from real Claude Code sessions.
 3. ~~Firmware: parse `snap`, draw header, rows, footer, "no host" screen.~~ **Done and verified on hardware** with the `demo` command.
 4. ~~Host: state machine, hook server, serial link.~~ **Done.** TOML config, rotating log, `/health`, Scheduled Task installer. Verified end to end against the board.
 5. ~~Hook forwarder and settings.~~ **Done.** Forwarding is `curl`, installed by `scripts/install-hooks.ps1`. Remaining: watch it with several real sessions running and confirm the exit criteria below.
+6. ~~Stabilise on hardware.~~ **Done.** Fixed an unsigned-underflow timing bug that made the device alternate with "no host", and added receive counters to the heartbeat so host-side and device-side silence can be told apart.
 
 Exit criteria: leaving a session on a permission prompt turns its row red within one second; answering it turns it blue; `Stop` turns it green.
 
