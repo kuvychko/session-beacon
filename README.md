@@ -11,10 +11,10 @@ The problem it solves: with three or four VS Code windows each running Claude Co
 | Part | Notes |
 |------|-------|
 | Arduino Nano ESP32 | ESP32-S3, native USB CDC serial, 3.3 V logic |
-| 1.8" TFT, 128x160, ST7735 | SPI, 3.3 V, 8-pin header (same [JESSINIE module](https://www.amazon.com/dp/B0D31BGJWF) used in `env_monitoring`) |
+| 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header. Same [JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF) as `env_monitoring`, but not the same panel: this one is BGR-wired and needs a colour-order fix the other does not. Check yours. |
 | USB-C cable | Data + power, nothing else needed |
 
-Wiring and display init are carried over from the `env_monitoring` firmware. See [docs/hardware.md](docs/hardware.md).
+Wiring is carried over from the `env_monitoring` firmware and needs no passives or level shifting: eight jumper wires, all 3.3 V. See [docs/hardware.md](docs/hardware.md) for the pinout and the bring-up procedure.
 
 ---
 
@@ -40,8 +40,28 @@ flowchart LR
 ```
 
 1. **Claude Code hooks** fire on session lifecycle events. Each one is a single `curl` call to the daemon, which measured about eight times cheaper than starting a Python interpreter per event.
-2. **beacon-host** keeps a per-session state machine (working / needs input / idle / ended), enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
+2. **beacon-host** keeps a per-session state machine (starting / working / needs input / error / idle / stale / ended), enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
 3. **Firmware** is deliberately dumb: it parses the snapshot and draws it. All policy lives on the host so it can change without reflashing.
+
+On the screen, one row per session:
+
+```
++----------------------------------------+
+| BEACON      4 active          $4.20    |
+|----------------------------------------|
+|############ env_monitoring      14m ####|  <- filled red, pulsing: wants you
+| o session-beacon                 2m    |  <- blue dot: working
+| o factory-dynamics               6m    |  <- amber dot: gone quiet
+| o homelab                        7s    |  <- green dot: finished its turn
+|                                        |
+|----------------------------------------|
+| ctx 41% [####......]          opus5    |
++----------------------------------------+
+```
+
+State is carried by colour rather than a word, and the elapsed time is how long a
+session has been in that state. The one that wants you fills its whole row and
+pulses, which reads from across a desk in a way six-pixel text does not.
 
 Details: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md), [docs/claude-code-integration.md](docs/claude-code-integration.md).
 
@@ -49,7 +69,22 @@ Details: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/p
 
 ## Status
 
-Scoping and skeleton only. Nothing has been flashed or run yet. See [docs/roadmap.md](docs/roadmap.md) for the phased plan; Phase 1 is the first thing to build.
+**Working end to end on Windows.** Hooks feed the daemon, the daemon drives the
+display, and the whole path has been exercised on real hardware.
+
+Verified on the bench: wiring and panel colour order, firmware rendering and its
+timers, the daemon and its state machine, hook delivery from live sessions,
+session labelling, and hardware SPI at 24 MHz.
+
+**One gap worth knowing about.** The events that drive the attention state,
+`PermissionRequest` and the attention `Notification` types, have not been seen
+firing yet. They are present in the Claude Code binary and the state machine
+handles all the paths they could arrive by, but triggering one needs an
+interactive permission prompt, which a scripted run cannot produce. Everything
+around it is confirmed; that one signal is still reasoning rather than evidence.
+
+Remaining work is comfort rather than function: see
+[docs/roadmap.md](docs/roadmap.md).
 
 ---
 
@@ -67,7 +102,7 @@ docs/                     Architecture, hardware, protocol, integration, roadmap
 
 ---
 
-## Quick start (target, not yet working)
+## Quick start
 
 ```powershell
 # 0. Wire the display per docs/hardware.md, then flash firmware/tft_smoketest to check it
