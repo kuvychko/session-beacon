@@ -69,16 +69,49 @@ The 5-argument constructor is **software SPI**, chosen in `env_monitoring` for r
 
 Flash `firmware/tft_smoketest/tft_smoketest.ino` before `beacon.ino`. It needs no host software and no ArduinoJson, so it isolates wiring problems from everything else. Open the Serial Monitor at 115200 with the Newline line ending.
 
-It runs four checks, then echoes whatever you type onto the screen.
+It runs a self-test on boot, then accepts single-letter commands so you can re-run any step or change the panel colour order without reflashing.
+
+| Command | Does |
+|---------|------|
+| `c` | Colour chart, the diagnostic for swapped channels |
+| `r` | Per-channel ramps |
+| `g` | Geometry, border and corner markers |
+| `t` | Text metrics |
+| `l` | Mock of the real beacon layout |
+| `a` | Whole self-test again |
+| `n` | Reset the colour-order register to the library default |
+| `x` | Toggle the RGB/BGR colour-order bit |
+| `mA8` | Set the colour-order register to a raw hex value |
+
+What each step proves:
 
 | Step | What you should see | What a failure means |
 |------|--------------------|--------------------|
-| Colours | Five full-screen fills, each labelled with its own name | Red and blue swapped: wrong init tab. Nothing at all: check VCC, BLK, and the DC/RST/CS wires. |
-| Geometry | A white border touching all four edges, corners reading TL, TR, BL, BR clockwise from top left | A coloured band along an edge, or a cut-off row: wrong panel offset, so wrong init tab. Corners out of order: wrong rotation. |
-| Text | 26 characters across one line at size 1 | Confirms the 6x8 font metrics the beacon layout assumes. |
-| Layout | A mock of the real beacon screen, four rows plus header and footer | This is the layout review. Judge row pitch and colours here, not after writing host software. |
+| Geometry | A white border touching all four edges, corners reading TL, TR, BL, BR clockwise from top left | A coloured band along an edge, or a cut-off row, means a wrong panel offset and so a wrong init tab. Corners out of order means a wrong rotation. |
+| Text | 26 characters across one line at size 1 | Confirms the font metrics the beacon layout assumes. |
+| Colour chart | Six labelled bars reading red, green, blue, cyan, magenta, yellow | Anything else is a channel permutation. See below. |
+| Layout | A mock of the real beacon screen | The layout review. Judge row pitch and colours here, not after writing host software. |
 
 If the screen stays dark through all of it but the Serial Monitor prints the banner, the board is fine and the problem is in the eight wires. If the Serial Monitor prints nothing, it is the board, the cable, or the port selection.
+
+## Colour channel troubleshooting
+
+The `c` command draws six patches chosen so that every channel permutation produces a different-looking screen. Read the bars top to bottom and find the column that matches.
+
+| Bar | Sent | Correct | Red and blue swapped | Red and green swapped | Green and blue swapped |
+|-----|------|---------|----------------------|-----------------------|------------------------|
+| R | `F800` | red | blue | green | red |
+| G | `07E0` | green | green | red | blue |
+| B | `001F` | blue | red | blue | green |
+| C | `07FF` | cyan | yellow | magenta | cyan |
+| M | `F81F` | magenta | magenta | cyan | yellow |
+| Y | `FFE0` | yellow | cyan | yellow | magenta |
+
+Only the red and blue case is a panel setting. The controller's colour-order flag swaps those two channels and nothing else, so `x` fixes it and the fix belongs in `beacon.ino` as an explicit register write after `setRotation`.
+
+The other two permutations cannot come from that flag. Red and green also occupy different bit widths in the pixel format, five bits against six, so a genuine swap of those two is not something the controller offers. If the chart lands in one of those columns, the fix is to correct the palette constants in software rather than to hunt for an init sequence. That costs nothing at runtime: the beacon defines every colour in one block at the top of `beacon.ino`.
+
+If a colour-order experiment leaves the screen mirrored or rotated, `n` restores the library default.
 
 ## USB serial notes
 
