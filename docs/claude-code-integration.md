@@ -75,7 +75,30 @@ That fallback matters: `used_percentage` is documented as null early in a sessio
 
 `beacon_hook.py --statusline` forwards the payload to `POST /status` and then prints a status line so the terminal still shows something useful. If you already have a custom statusline, it can be wrapped rather than replaced. That is a phase 2 detail.
 
-Account-level rate limit and remaining credit figures, the ones `/usage` shows, are not exposed to hooks or to the statusline. "Usage stats" on this device therefore means per-session cost and context percent.
+### Account-level usage is available after all
+
+An earlier version of this file said account-level rate limit figures were not exposed
+to hooks or the statusline. That was wrong, and a captured payload disproves it. The
+statusline carries:
+
+```json
+"rate_limits": {
+  "five_hour":  { "used_percentage": 92, "resets_at": 1788571200 },
+  "seven_day":  { "used_percentage": 28, "resets_at": 1788800400 }
+}
+```
+
+Both a percentage and a reset time, for the rolling five-hour and seven-day windows.
+That is the "high-level usage stats" this project was scoped around and assumed it
+could not have. Nothing displays it yet; see the roadmap.
+
+The same payload also carries `version`, `exceeds_200k_tokens`, `session_name`,
+`fast_mode`, `output_style`, `thinking`, `prompt_cache`, and richer `cost` fields
+including `total_lines_added` and `total_lines_removed`.
+
+Observed values confirm the context fields work as documented:
+`context_window.used_percentage` was 54 against a `context_window_size` of 1000000,
+and `model.display_name` was `Opus 5`.
 
 ## Example settings.json fragment
 
