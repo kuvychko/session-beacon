@@ -1,21 +1,57 @@
-MIT License
-
 Copyright (c) 2026 Igor Kuvychko
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This project contains software, hardware design files, and documentation.
+Those are different kinds of work, and each is licensed under the licence
+written for it. Full texts are in LICENSES/.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+  Software and firmware        MIT                  LICENSES/MIT.txt
+  Hardware and enclosure       CERN-OHL-P-2.0       LICENSES/CERN-OHL-P-2.0.txt
+  Documentation and images     CC-BY-4.0            LICENSES/CC-BY-4.0.txt
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+All three are permissive. None of them requires you to open your own work.
+
+
+WHICH LICENCE APPLIES TO WHICH FILE
+
+Stated by path, because "hardware files" and "documentation" are ambiguous at
+the edges and a path is not.
+
+  MIT
+    firmware/          Arduino sketches
+    host/              Python daemon, tests and configuration
+    hooks/             Claude Code hook helpers
+    scripts/           PowerShell install and uninstall scripts
+    anything not listed below
+
+  CERN-OHL-P-2.0
+    enclosure/         SolidWorks sources, STEP exports and 3MF meshes
+
+  CC-BY-4.0
+    docs/              All documentation
+    photos/            Photographs of the build
+    README.md          and any other Markdown at the repository root
+
+
+CODE INSIDE DOCUMENTATION IS MIT
+
+The documentation is full of code: pin definitions, register writes, shell
+commands, configuration snippets. Those samples are MIT, not CC-BY-4.0. Copy
+them into your own project without attributing anything. The prose around them
+is CC-BY-4.0, so quote or adapt that with credit.
+
+This carve-out exists because the alternative is absurd. Nobody should have to
+attribute a four-line function they copied out of a troubleshooting guide.
+
+
+THIRD-PARTY COMPONENTS
+
+Third-party libraries, fonts and other components keep their own licences.
+Nothing here relicenses them. The dependencies this project builds against are
+all permissive:
+
+  Adafruit GFX Library                      BSD
+  Adafruit ST7735 and ST7789 Library        BSD
+  Adafruit BusIO                            MIT
+  ArduinoJson                               MIT
+  pyserial                                  BSD
+  pytest                                    MIT

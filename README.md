@@ -123,8 +123,18 @@ breadboard. Remaining work is comfort rather than function: see
 
 ## Contributing and licence
 
-MIT, see [LICENSE](LICENSE). Every dependency is BSD or MIT, so nothing here
-constrains what you do with it.
+Three licences, one per kind of work, all permissive. Full texts in
+[`LICENSES/`](LICENSES), and [LICENSE](LICENSE) maps them to paths.
+
+| What | Licence |
+|------|---------|
+| Software and firmware | MIT |
+| Enclosure design files | CERN-OHL-P-2.0 |
+| Documentation and photos | CC BY 4.0 |
+
+Code samples inside the documentation are MIT, not CC BY, so you can copy a pin
+definition or a shell command without attributing anything. Every dependency is
+BSD or MIT, so nothing here constrains what you do with it.
 
 **Interest in an RP2040 port is welcome.** The Nano ESP32 is overkill for this: its
 Wi-Fi and Bluetooth are most of what you pay for and the project uses neither, by
