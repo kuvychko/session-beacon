@@ -624,8 +624,8 @@ static void demoLoad() {
   struct { const char* l; const char* st; uint32_t age; int8_t ctx; const char* m; } rows[] = {
     {"env_monitoring", "need",  844, 41, "opus5"},
     {"session-beacon", "work",  126, 62, "fable5.1"},
-    {"factory-dynamics", "err",   362, -1, ""},
-    {"bench-metrology","stale", 900, -1, ""},
+    {"data-pipeline", "err",   362, -1, ""},
+    {"web-frontend","stale", 900, -1, ""},
     {"homelab",        "idle",    7, 18, "sonnet5"},
   };
   for (uint8_t i = 0; i < 5; i++) {

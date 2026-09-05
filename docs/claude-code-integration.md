@@ -115,7 +115,7 @@ Windows notes:
 
 ```toml
 [labels]
-"C:/Repos/factory-dynamics-research" = "fd-research"
+"C:/Repos/long-project-name" = "fd-research"
 ```
 
 ## How much of this is verified

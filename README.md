@@ -75,11 +75,11 @@ On the screen, one row per session:
 +----------------------------------------+
 | BEACON      4 active         $61.17    |
 |----------------------------------------|
-||########## env_monitoring      14m ####|  filled red + pulsing: wants you now
-| o session-beacon                2m     |  blue: working
-| o factory-dynamics              6m     |  magenta: stopped on an API error
-| o bench-metrology              15m     |  amber: busy but gone quiet
-| o homelab                       7s     |  green: finished its turn
+|############ env_monitoring     14m ####|  wants you now: filled red, pulsing
+| o session-beacon                 2m    |  blue: working
+| o data-pipeline                  6m    |  magenta: stopped on an API error
+| o web-frontend                  15m    |  amber: busy but gone quiet
+| o homelab                        7s    |  green: finished its turn
 |                                        |
 |----------------------------------------|
 | ctx  73% [#######...]         opus5    |  <- 4s
@@ -120,6 +120,18 @@ breadboard. Remaining work is comfort rather than function: see
 [docs/roadmap.md](docs/roadmap.md).
 
 ---
+
+## Contributing and licence
+
+MIT, see [LICENSE](LICENSE). Every dependency is BSD or MIT, so nothing here
+constrains what you do with it.
+
+**Interest in an RP2040 port is welcome.** The Nano ESP32 is overkill for this: its
+Wi-Fi and Bluetooth are most of what you pay for and the project uses neither, by
+design. A Waveshare RP2040-Zero would be cheaper and smaller. If there is enough
+interest, I am willing to test that board and design a dedicated enclosure for it.
+Say so in an issue. What a port involves is written up in
+[docs/enclosure.md](docs/enclosure.md#if-you-were-starting-from-scratch).
 
 ## Repository layout
 

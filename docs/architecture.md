@@ -151,9 +151,9 @@ Two changes, both worth keeping:
 +----------------------------------------+
 | BEACON      4 active          $4.20    |  header, 16 px
 |----------------------------------------|
-|############ env_monitoring      14m ####|  row 1, filled red, pulsing
+|############ env_monitoring     14m ####|  row 1, filled red, pulsing
 | o session-beacon                 2m    |  row 2, blue dot
-| o factory-dynamics               6m    |  row 3, amber dot
+| o data-pipeline                  6m    |  row 3, amber dot
 | o homelab                        7s    |  row 4, green dot
 |                                        |
 |                                        |

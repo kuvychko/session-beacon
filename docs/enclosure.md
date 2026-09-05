@@ -124,6 +124,10 @@ Two things stand in the way, and both are real work rather than a swap:
 Untested. Nobody has built this on an RP2040-Zero; the above is what a port would have
 to deal with, not a report from having done it.
 
+**If there is enough interest, this is worth doing properly.** The maintainer is
+willing to test an RP2040-Zero and design a dedicated enclosure for it rather than
+leave the port as an exercise. Open an issue if you would use it.
+
 ## Versioning
 
 Files are suffixed `-v0`. That is the revision that was fitted and works. If a part is

@@ -22,5 +22,5 @@ log_level = "INFO"
 #   'C:\Repos\thing' = "thg"     correct
 #   "C:\Repos\thing" = "thg"     fails to parse
 [labels]
-"C:/Repos/factory-dynamics-research" = "fd-research"
-"C:/Repos/figures-repo-2026-04-26-tropical-algebra" = "tropical-alg"
+"C:/Repos/long-project-name" = "fd-research"
+"C:/Repos/another-long-repo" = "tropical-alg"

@@ -215,7 +215,7 @@ static void testBeaconLayout() {
   struct { const char* label; const char* age; uint16_t col; bool need; } rows[] = {
     {"env_monitoring",   "14m", ST77XX_RED,   true },
     {"session-beacon",   "2m",  0x04FF,       false},
-    {"factory-dynamics", "6m",  0xFD20,       false},
+    {"data-pipeline", "6m",  0xFD20,       false},
     {"homelab",          "7s",  ST77XX_GREEN, false},
   };
 

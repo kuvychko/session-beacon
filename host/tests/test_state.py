@@ -157,7 +157,7 @@ def test_label_falls_back_to_basename_outside_a_repo(tmp_path):
 
 
 def test_label_override_matches_repo_root_or_exact_cwd(tmp_path):
-    repo = tmp_path / "factory-dynamics-research"
+    repo = tmp_path / "long-project-name"
     (repo / ".git").mkdir(parents=True)
     sub = repo / "sim"
     sub.mkdir()

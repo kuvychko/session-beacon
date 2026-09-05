@@ -14,7 +14,7 @@ Sent whenever host state changes, and at least once per second while any session
   {"id":"a1b2c3d4","l":"session-beacon","st":"work","age":120,"ctx":62,"m":"fable5.1"},
   {"id":"e5f6a7b8","l":"env_monitoring","st":"need","age":840,"ctx":41,"m":"opus"},
   {"id":"c9d0e1f2","l":"homelab","st":"idle","age":5},
-  {"id":"a3b4c5d6","l":"factory-dyn","st":"stale","age":360}
+  {"id":"a3b4c5d6","l":"data-pipeline","st":"stale","age":360}
  ]}
 ```
 
