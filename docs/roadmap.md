@@ -38,9 +38,8 @@ yet shown; the percentage is the actionable number and there is no room for both
 
 ### Enclosure ~~(TBD)~~ **done**
 
-Three printed parts, fitted, in `enclosure/` as 3MF. The print settings that made
-v0 fit were never written down, which is the one loose end: see
-[enclosure.md](enclosure.md).
+Three printed parts, fitted, in `enclosure/` as 3MF, with print settings and the
+full bill of materials in [enclosure.md](enclosure.md).
 
 ## Phase 3: Nice to have
 

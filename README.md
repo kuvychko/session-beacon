@@ -15,7 +15,7 @@ The problem it solves: with three or four VS Code windows each running Claude Co
 | USB-C cable | Data + power, nothing else needed |
 | Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. 3MF in [`enclosure/`](enclosure) |
 | 4x M2 x 12 hex-head screws + 4x M2 nuts | Through the stack |
-| 26 AWG hookup wire, soft insulation | Eight conductors. Jumper wire is too stiff to fit |
+| 26 AWG silicone hookup wire, tinned copper | Eight conductors. Silicone is the point: PVC jumper wire is too stiff and springs the case open |
 
 Wiring is carried over from the `env_monitoring` firmware and needs no passives or level shifting: eight conductors, all 3.3 V. See [docs/hardware.md](docs/hardware.md) for the pinout and bring-up procedure, and [docs/enclosure.md](docs/enclosure.md) for the case and the full bill of materials.
 

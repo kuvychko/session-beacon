@@ -25,23 +25,51 @@ elephant's foot on the first layer.
 | 4 | M2 x 12 machine screws, hex head | Through the stack |
 | 4 | M2 nuts | |
 | 1 | USB-C cable, data and power | Nothing else connects to the outside |
-| 8 | Lengths of 26 AWG hookup wire, soft insulation | Board to display |
+| 8 | 26 AWG **silicone**-insulated hookup wire, stranded tinned copper | Board to display. Sold as "Flexible 26 Gauge Silicone Hook up Wire Kit, Electrical Tinned Copper Wire" |
 | 3 | Printed parts | `front`, `mid`, `back` from `enclosure/` |
 
-**The wire specification is not incidental.** Bring-up used ordinary breadboard jumper
-wires, which are stiff and take up more room than the case has. Soft-insulation 26 AWG
-bends into the cavity without pushing the display off its seat or straining the header
-pins. If you rebuild this, do not substitute jumpers and expect the lid to close.
+**The wire specification is not incidental, and silicone is the part that matters.**
+Bring-up used ordinary breadboard jumper wires. They are PVC-insulated and stiff, they
+hold whatever bend you last put in them, and inside a 19 mm cavity that spring-back
+pushes the display off its seat and strains the header pins. The lid will not close.
+
+Silicone-insulated wire solves it on four counts:
+
+- **It stays limp.** Silicone has almost no memory, so the wire lies where it is put
+  instead of trying to straighten out against the lid.
+- **It is finely stranded.** Flexible silicone wire uses many thin strands rather than
+  a solid core or a few coarse ones, which is most of where the flexibility comes from.
+- **Tinned copper does not fray or tarnish.** The strands stay together when stripped
+  and take solder without fuss.
+- **It tolerates a soldering iron.** Silicone is good to around 200 C. PVC shrinks back
+  from the heat and can leave bare conductor near the joint, which matters most on
+  short leads where the iron is close to the insulation. In a sealed metal-free box the
+  consequence is not dramatic, but a receded jacket next to a 3.3 V rail is still a
+  thing you would rather not build in.
+
+If you rebuild this, do not substitute jumpers and expect it to fit.
 
 Wiring itself is unchanged from bring-up: eight conductors, no passives, no level
 shifting. The pinout is in [hardware.md](hardware.md#wiring).
 
 ## Print settings
 
-Not recorded. The parts were printed, fine-tuned and fitted before this file existed,
-so material, layer height, orientation and supports are all unknown to the repository.
-Worth filling in from the slicer project before the next print, because "v0 fitted" is
-only reproducible if the settings that made it fit are written down.
+These are the settings that produced the parts that fit.
+
+| | |
+|---|---|
+| Printer | Prusa i3 MK3S |
+| Nozzle | 0.4 mm |
+| Layer height | 0.10 mm, the stock **DETAIL** preset |
+| Material | PLA |
+
+Treat the layer height as part of the fit, not as a finish preference. A box this size
+does not need 0.10 mm for strength, and these parts were fine-tuned until they fitted
+at this setting, so a coarser layer is a change to the tolerances rather than just a
+faster print. If a reprint comes out tight, suspect that before reaching for the model.
+
+Orientation and supports were not recorded. Shallow plates printed flat with no
+supports is the obvious reading, but nobody wrote it down, so it is a guess.
 
 ## Versioning
 
