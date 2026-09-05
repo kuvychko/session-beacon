@@ -2,7 +2,7 @@
 
 ## Parts
 
-- **Arduino Nano ESP32** (ABX00083). ESP32-S3, USB-C, native USB CDC. Arduino pin names (`D10`, not GPIO numbers) are used throughout.
+- **Arduino Nano ESP32, headerless** (ABX00092). ESP32-S3, USB-C, native USB CDC. Arduino pin names (`D10`, not GPIO numbers) are used throughout. The headered SKU is ABX00083 and will not fit the enclosure; see [enclosure.md](enclosure.md#assembly-constraints).
 - **1.8" TFT LCD, 128x160, ST7735S, 3.3 V, SPI, 8-pin.** [JESSINIE module](https://www.amazon.com/dp/B0D31BGJWF) (ASIN B0D31BGJWF), the same listing used in `env_monitoring`. Same part number, but not an identical panel: see [Panel colour order](#panel-colour-order).
 
 Power: everything runs off the Nano's 3V3 pin from USB. The display draws about 30 mA including backlight, so the onboard regulator handles it comfortably.
