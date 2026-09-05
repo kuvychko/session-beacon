@@ -29,17 +29,12 @@ Exit criteria: leaving a session on a permission prompt turns its row red within
 - Label overrides in config.
 - Backlight on PWM pin, dim after N minutes of all-idle.
 
-### Account-level rate limits
+### Account-level rate limits ~~(unbuilt)~~ **done**
 
-The statusline payload carries `rate_limits.five_hour` and `rate_limits.seven_day`,
-each with a used percentage and a reset timestamp. This was assumed impossible during
-scoping and is the one thing from the original brief still unbuilt.
-
-It is also the most valuable thing left: session state tells you what to look at now,
-but a five-hour window at 92% tells you to change what you are doing. Open question is
-where it goes, since the footer already carries the featured session's context bar and
-model. Options: alternate the footer between the two, give the header a second line, or
-show the rate limit only once it passes a threshold.
+The footer alternates every four seconds between the featured session's context and
+the account's five-hour and seven-day usage. Both pages share the same field
+positions so nothing jumps. Reset timestamps are available in the payload but not
+yet shown; the percentage is the actionable number and there is no room for both.
 
 ## Phase 3: Nice to have
 

@@ -78,6 +78,7 @@ static constexpr size_t   LINE_BUF      = 1024;
 static constexpr uint32_t NO_HOST_MS    = 10000;
 static constexpr uint32_t BLINK_MS      = 500;
 static constexpr uint32_t HEARTBEAT_MS  = 3000;
+static constexpr uint32_t FOOTER_PAGE_MS = 4000;  // footer alternation period
 static constexpr uint8_t  MAX_ROWS      = 6;
 
 static constexpr int16_t W = 160, H = 128;
@@ -144,6 +145,8 @@ struct Snapshot {
   uint8_t count = 0;
   int8_t sel = -1;
   float cost = -1;
+  int8_t rlH5 = -1;   // account usage, 5-hour window, percent. -1 = unknown
+  int8_t rlD7 = -1;   // account usage, 7-day window, percent
   Session s[MAX_ROWS];
 };
 
@@ -173,7 +176,10 @@ struct HeaderView {
 struct FooterView {
   bool valid = false;
   bool hint = false;   // showing the "nothing feeds this" message
+  uint8_t page = 0;    // 0 = session context, 1 = account rate limits
   int8_t ctx = -2;
+  int8_t h5 = -2;
+  int8_t d7 = -2;
   char model[9] = "";
 };
 
@@ -187,6 +193,8 @@ uint32_t lastMsgMs = 0;
 uint32_t lastBlinkMs = 0;
 uint32_t lastHbMs = 0;
 bool blinkOn = true;
+uint8_t footerPage = 0;
+uint32_t lastFooterFlipMs = 0;
 bool showingNoHost = false;
 bool shownEmpty = false;
 bool demoMode = false;
@@ -399,15 +407,30 @@ static void drawFooter() {
     ctx = snap.s[snap.sel].ctx;
     model = snap.s[snap.sel].model;
   }
-  // Cost and context reach the host only through the statusline hook, which is
-  // optional. Without it this strip was simply blank, which reads as a broken
-  // display rather than as a feature that was never switched on.
-  const bool hint = (ctx < 0 && !model[0]);
+  const int8_t h5 = snap.rlH5, d7 = snap.rlD7;
+  const bool hasCtx = (ctx >= 0 || model[0]);
+  const bool hasRates = (h5 >= 0 || d7 >= 0);
 
-  // Entering or leaving the hint repaints the whole strip; the two layouts
-  // share no fields, so drawing one over the other would leave fragments.
-  const bool fresh = !shownFooter.valid || shownFooter.hint != hint;
-  if (!fresh && shownFooter.ctx == ctx && !strcmp(shownFooter.model, model)) return;
+  // Cost, context and account usage all reach the host through the statusline
+  // hook, which is optional. Without it this strip was simply blank, which
+  // reads as a broken display rather than a feature never switched on.
+  const bool hint = !hasCtx && !hasRates;
+
+  // Only alternate when both pages have something to say. One page on its own
+  // just stays put, so a session with no account figures does not blink at an
+  // empty second page.
+  uint8_t page = 0;
+  if (hint)                page = 0;
+  else if (hasCtx && hasRates) page = footerPage;
+  else if (hasRates)       page = 1;
+
+  // Switching page or entering the hint repaints the whole strip. The layouts
+  // occupy the same fields but not the same values, so drawing one over the
+  // other would leave fragments.
+  const bool fresh = !shownFooter.valid || shownFooter.hint != hint ||
+                     shownFooter.page != page;
+  if (!fresh && shownFooter.ctx == ctx && shownFooter.h5 == h5 &&
+      shownFooter.d7 == d7 && !strcmp(shownFooter.model, model)) return;
 
   const int16_t ty = FOOTER_Y + 5;
   tft.setTextSize(1);
@@ -424,7 +447,52 @@ static void drawFooter() {
     tft.print("no statusline data");
     shownFooter.valid = true;
     shownFooter.hint = hint;
+    shownFooter.page = page;
     shownFooter.ctx = ctx;
+    shownFooter.h5 = h5;
+    shownFooter.d7 = d7;
+    copyStr(shownFooter.model, sizeof shownFooter.model, model);
+    return;
+  }
+
+  // Page 1: account usage. Deliberately the same three fields in the same
+  // places as page 0, so alternating does not make the strip jump.
+  //
+  //   "5h   92%"   bar        "7d  28%"
+  //   "ctx  54%"   bar          "opus5"
+  if (page == 1) {
+    char buf[12];
+    if (h5 >= 0) snprintf(buf, sizeof buf, "5h %3d%%", h5);
+    else         snprintf(buf, sizeof buf, "%8s", "5h   --");
+    tft.setCursor(4, ty);
+    tft.print(buf);
+
+    if (h5 >= 0) {
+      tft.drawRect(BAR_X, ty, BAR_W, 7, C_GRID);
+      const int16_t inner = BAR_W - 2;
+      int16_t filled = inner * h5 / 100;
+      if (filled > inner) filled = inner;
+      const uint16_t fill = h5 > 85 ? C_NEED : (h5 > 65 ? C_STALE : C_IDLE);
+      if (filled > 0) tft.fillRect(BAR_X + 1, ty + 1, filled, 5, fill);
+      if (filled < inner)
+        tft.fillRect(BAR_X + 1 + filled, ty + 1, inner - filled, 5, C_BG);
+    } else {
+      tft.fillRect(BAR_X, ty, BAR_W, 7, C_BG);
+    }
+
+    // Same 8-char field the model name uses on page 0: "  7d  28%".
+    char right[MODEL_W + 1];
+    if (d7 >= 0) snprintf(right, sizeof right, "%*s%3d%%", 4, "7d", d7);
+    else         snprintf(right, sizeof right, "%*s", (int)MODEL_W, "");
+    tft.setCursor(MODEL_X, ty);
+    tft.print(right);
+
+    shownFooter.valid = true;
+    shownFooter.hint = hint;
+    shownFooter.page = page;
+    shownFooter.ctx = ctx;
+    shownFooter.h5 = h5;
+    shownFooter.d7 = d7;
     copyStr(shownFooter.model, sizeof shownFooter.model, model);
     return;
   }
@@ -462,7 +530,10 @@ static void drawFooter() {
 
   shownFooter.valid = true;
   shownFooter.hint = hint;
+  shownFooter.page = page;
   shownFooter.ctx = ctx;
+  shownFooter.h5 = h5;
+  shownFooter.d7 = d7;
   copyStr(shownFooter.model, sizeof shownFooter.model, model);
 }
 
@@ -506,6 +577,8 @@ static bool parseMessage(const char* line) {
   ns.n = doc["n"] | 0;
   ns.sel = doc["sel"] | -1;
   ns.cost = doc["cost"] | -1.0f;
+  ns.rlH5 = doc["rl"]["h5"] | -1;
+  ns.rlD7 = doc["rl"]["d7"] | -1;
 
   for (JsonObject o : doc["s"].as<JsonArray>()) {
     if (ns.count >= MAX_ROWS) break;
@@ -533,6 +606,8 @@ static void demoLoad() {
   d.count = 5;
   d.sel = 0;
   d.cost = 4.20f;
+  d.rlH5 = 92;
+  d.rlD7 = 28;
 
   struct { const char* l; const char* st; uint32_t age; int8_t ctx; const char* m; } rows[] = {
     {"env_monitoring", "need",  844, 41, "opus5"},
@@ -613,6 +688,13 @@ void loop() {
       for (uint8_t i = 0; i < snap.count; i++)
         if (isNeed(snap.s[i].state)) drawRow(i);
     }
+  }
+
+  // Alternate the footer between session context and account usage.
+  if (elapsed(now, lastFooterFlipMs, FOOTER_PAGE_MS)) {
+    lastFooterFlipMs = now;
+    footerPage ^= 1;
+    if (snap.valid && !showingNoHost) drawFooter();
   }
 
   // Demo mode advances its own timers so the layout can be watched live.

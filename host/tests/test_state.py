@@ -166,3 +166,45 @@ def test_label_override_matches_repo_root_or_exact_cwd(tmp_path):
     st = SessionStore(label_overrides={root_key: "fd-research"})
     st.apply_event(ev("PostToolUse", cwd=str(sub)), 0)
     assert st.snapshot(1)["s"][0]["l"] == "fd-research"
+
+
+STATUS_WITH_RATES = {
+    "session_id": "x",
+    "model": {"display_name": "Opus 5"},
+    "context_window": {"used_percentage": 54},
+    "rate_limits": {
+        "five_hour": {"used_percentage": 92, "resets_at": 1788571200},
+        "seven_day": {"used_percentage": 28.000000000000004, "resets_at": 1788800400},
+    },
+}
+
+
+def test_rate_limits_reach_the_snapshot():
+    """Account usage was assumed unavailable during scoping; the statusline
+    carries it. Shape matches a payload captured from this machine."""
+    st = SessionStore()
+    st.apply_status(STATUS_WITH_RATES, 100.0)
+    snap = st.snapshot(101.0)
+    assert snap["rl"] == {"h5": 92, "d7": 28}   # note the float is rounded
+
+
+def test_rate_limits_expire_rather_than_go_stale():
+    """They only refresh while a statusline is running. A percentage from an
+    hour ago is worse than none when the point is knowing where you stand."""
+    st = SessionStore()
+    st.apply_status(STATUS_WITH_RATES, 0.0)
+    assert "rl" in st.snapshot(299.0)
+    assert "rl" not in st.snapshot(301.0)
+
+
+def test_rate_limits_absent_when_the_statusline_does_not_carry_them():
+    st = SessionStore()
+    st.apply_status({"session_id": "x", "context_window": {"used_percentage": 10}}, 0)
+    assert "rl" not in st.snapshot(1)
+
+
+def test_rate_limits_clamped_and_partial_accepted():
+    st = SessionStore()
+    st.apply_status({"session_id": "x", "rate_limits": {
+        "five_hour": {"used_percentage": 130}}}, 0)
+    assert st.snapshot(1)["rl"] == {"h5": 100}

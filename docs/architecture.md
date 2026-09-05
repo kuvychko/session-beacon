@@ -158,7 +158,7 @@ Two changes, both worth keeping:
 |                                        |
 |                                        |
 |----------------------------------------|
-| ctx 41% [####......]          opus5    |  footer, 16 px: featured session
+| ctx 41% [####......]          opus5    |  footer, alternates every 4 s
 +----------------------------------------+
 ```
 
@@ -185,6 +185,29 @@ Row colours:
 | `err` | magenta | Age also drawn magenta |
 | `start` | grey | Plain |
 | `end` | dim grey | Label drawn grey |
+
+### The footer alternates
+
+It carries two pages, four seconds each:
+
+```
+| ctx  54% [#####.....]         opus5    |   the featured session
+| 5h   92% [#########.]       7d  28%    |   this account's usage
+```
+
+Both pages put their three fields at identical positions, so alternating does not
+make anything jump: an eight-character value on the left, the same bar, an
+eight-character value on the right. The bar is coloured by threshold either way,
+so a five-hour window at 92% turns it red exactly as a nearly-full context window
+does.
+
+It only alternates when both pages have something to say. With no account figures
+it parks on the session page, and with no session context it parks on the usage
+page, so nothing ever blinks at a blank second page.
+
+Rate limits arrive only with a statusline refresh, so the host drops them from the
+snapshot after five minutes without one. A percentage from an hour ago is worse
+than no percentage when the whole point is knowing where you stand now.
 
 The pulse alternates between two readable states rather than flashing text in and out, so the row reads as a pulse instead of a flicker. Because it is driven by a local timer, the host never has to send frames for it.
 

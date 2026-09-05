@@ -55,7 +55,8 @@ On the screen, one row per session:
 | o homelab                        7s    |  <- green dot: finished its turn
 |                                        |
 |----------------------------------------|
-| ctx 41% [####......]          opus5    |
+| ctx 41% [####......]          opus5    |  <- alternates every 4s with:
+| 5h  92% [#########.]       7d  28%    |     your account's usage
 +----------------------------------------+
 ```
 

@@ -75,6 +75,13 @@ class SessionStore:
     label_overrides: dict[str, str] = field(default_factory=dict)
     sessions: dict[str, Session] = field(default_factory=dict)
     _root_cache: dict[str, str] = field(default_factory=dict, repr=False)
+    # Account-level, not per-session, so it lives on the store. Timestamped
+    # because it only arrives with a statusline refresh: once every session is
+    # closed the figures stop updating, and a stale percentage is worse than
+    # none when the whole point is knowing where you stand right now.
+    rate_limits: dict[str, int] = field(default_factory=dict)
+    rate_limits_at: float = 0.0
+    rate_limit_max_age_s: float = 300.0
 
     # ---- inputs ----
 
@@ -140,6 +147,8 @@ class SessionStore:
         if isinstance(cost, (int, float)):
             s.cost_usd = float(cost)
         s.ctx_pct = extract_ctx_pct(st)
+        if rl := extract_rate_limits(st):
+            self.rate_limits, self.rate_limits_at = rl, now
 
     def tick(self, now: float) -> None:
         """Advance time: mark stale sessions, drop ended ones."""
@@ -166,6 +175,8 @@ class SessionStore:
         }
         if costs:
             out["cost"] = round(sum(costs), 2)
+        if self.rate_limits and now - self.rate_limits_at <= self.rate_limit_max_age_s:
+            out["rl"] = dict(self.rate_limits)
         return out
 
     # ---- internals ----
@@ -239,6 +250,23 @@ def short_model(display_name: str) -> str:
     """'Claude Fable 5.1' -> 'fable5.1'. Good enough for an 8-char field."""
     parts = display_name.lower().replace("claude", "").split()
     return "".join(parts)[:8]
+
+
+def extract_rate_limits(st: dict[str, Any]) -> dict[str, int]:
+    """Account-level usage from a statusline payload.
+
+    Scoping assumed this was not available anywhere. It is: the statusline
+    carries `rate_limits.five_hour` and `rate_limits.seven_day`, each with a
+    used percentage and a reset timestamp. Percentages are all the display has
+    room for; the reset times are deliberately not forwarded yet.
+    """
+    rl = st.get("rate_limits") or {}
+    out: dict[str, int] = {}
+    for key, short in (("five_hour", "h5"), ("seven_day", "d7")):
+        v = (rl.get(key) or {}).get("used_percentage")
+        if isinstance(v, (int, float)):
+            out[short] = max(0, min(100, int(round(v))))
+    return out
 
 
 def extract_ctx_pct(st: dict[str, Any]) -> int | None:

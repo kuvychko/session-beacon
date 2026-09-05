@@ -9,7 +9,7 @@ Design goals: readable on a serial monitor, trivial to parse with ArduinoJson, a
 Sent whenever host state changes, and at least once per second while any session is not `idle` so on-device timers stay honest. The device replaces its entire view with each snapshot. There are no deltas.
 
 ```json
-{"t":"snap","v":1,"ts":1725480000,"n":4,"cost":4.2,"sel":1,
+{"t":"snap","v":1,"ts":1725480000,"n":4,"cost":4.2,"sel":1,"rl":{"h5":92,"d7":28},
  "s":[
   {"id":"a1b2c3d4","l":"session-beacon","st":"work","age":120,"ctx":62,"m":"fable5.1"},
   {"id":"e5f6a7b8","l":"env_monitoring","st":"need","age":840,"ctx":41,"m":"opus"},
@@ -29,6 +29,7 @@ Top level:
 | `cost` | float | Sum of `total_cost_usd` across live sessions. Omitted if unknown. |
 | `sel` | int | Index into `s` of the featured session shown in the footer. Host picks the most urgent. |
 | `s` | array | Sessions, already sorted by the host in display order. Max 6. |
+| `rl` | object | Account usage: `h5` and `d7` are used percentages for the rolling five-hour and seven-day windows. Either key may be absent. Omitted entirely when no statusline has reported in the last five minutes, because a stale percentage is worse than none. |
 
 Session object:
 
