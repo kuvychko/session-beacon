@@ -93,6 +93,7 @@ static constexpr int16_t FOOTER_Y = H - FOOTER_H;
 // to need, which is what made the label and the age collide.
 //
 //   dot 3..9 | label 13..109 (16 chars) | gap | age right-aligned to 157
+static constexpr int16_t SEL_W      = 2;    // featured-row marker, x 0..1
 static constexpr int16_t DOT_CX     = 6;
 static constexpr int16_t DOT_R      = 3;
 static constexpr int16_t LABEL_X    = 13;
@@ -157,6 +158,7 @@ Snapshot snap;
 // the host resends a snapshot every second purely to advance the timers.
 struct RowView {
   bool used = false;
+  bool featured = false;
   char label[LABEL_MAX + 1] = "";
   char age[AGE_W + 1] = "";
   // Colours rather than the state name: they are what actually gets drawn, and
@@ -350,6 +352,11 @@ static void drawHeader() {
 static void drawRow(uint8_t i) {
   const Session& s = snap.s[i];
   const bool need = isNeed(s.state);
+  // The footer's context page describes one session, and without a mark on the
+  // row it belongs to, a reader has no way to tell which. It stays put rather
+  // than appearing only while that page is up: a marker blinking every four
+  // seconds would be worse than a slightly imprecise one.
+  const bool featured = (snap.sel >= 0 && i == (uint8_t)snap.sel);
 
   uint16_t bg = C_BG, labelFg = C_TEXT, ageFg = C_MUTED, dot = stateColor(s.state);
   if (need) {
@@ -372,6 +379,10 @@ static void drawRow(uint8_t i) {
   const int16_t y = ROWS_Y + i * ROW_H;
 
   if (fresh) tft.fillRect(0, y, W, ROW_H, bg);
+  // Same colour as the label, so it adapts to the state without another rule:
+  // white normally, black against the filled attention row, grey when ended.
+  if (fresh || v.featured != featured || v.labelFg != labelFg)
+    tft.fillRect(0, y, SEL_W, ROW_H, featured ? labelFg : bg);
   if (fresh || v.dot != dot) tft.fillCircle(DOT_CX, y + ROW_H / 2, DOT_R, dot);
 
   tft.setTextSize(1);
@@ -387,6 +398,7 @@ static void drawRow(uint8_t i) {
   }
 
   v.used = true;
+  v.featured = featured;
   copyStr(v.label, sizeof v.label, label);
   copyStr(v.age, sizeof v.age, age);
   v.bg = bg; v.labelFg = labelFg; v.ageFg = ageFg; v.dot = dot;
@@ -604,7 +616,7 @@ static void demoLoad() {
   d.valid = true;
   d.n = 5;
   d.count = 5;
-  d.sel = 0;
+  d.sel = 0;   // the attention row, which the footer describes
   d.cost = 4.20f;
   d.rlH5 = 92;
   d.rlD7 = 28;

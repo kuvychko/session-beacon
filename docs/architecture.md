@@ -168,6 +168,7 @@ Six rows of 16 px fit between the header and the footer, using the default 6x8 G
 
 | Element | x range | Notes |
 |---------|---------|-------|
+| Featured marker | 0 to 1 | Present only on the session the footer describes |
 | Dot | 3 to 9 | Filled circle in the state colour |
 | Label | 13 to 109 | Up to 16 characters, truncated by the host |
 | Age | ends at 157 | Right-aligned, up to 4 characters |
@@ -194,6 +195,14 @@ It carries two pages, four seconds each:
 | ctx  54% [#####.....]         opus5    |   the featured session
 | 5h   92% [#########.]       7d  28%    |   this account's usage
 ```
+
+The context page describes **one** session, the one at `sel`, and that row carries a
+two-pixel marker down its left edge so it is visible which. The marker takes the
+label's colour, so it adapts to the state for free: white normally, black against the
+filled attention row, grey on an ended one. It stays put rather than appearing only
+while the context page is up, because a marker blinking every four seconds would be
+worse than a slightly imprecise one. The usage page is account-wide and belongs to no
+row.
 
 Both pages put their three fields at identical positions, so alternating does not
 make anything jump: an eight-character value on the left, the same bar, an

@@ -47,18 +47,23 @@ On the screen, one row per session:
 
 ```
 +----------------------------------------+
-| BEACON      4 active          $4.20    |
+| BEACON      4 active         $61.17    |
 |----------------------------------------|
-|############ env_monitoring      14m ####|  <- filled red, pulsing: wants you
-| o session-beacon                 2m    |  <- blue dot: working
-| o factory-dynamics               6m    |  <- amber dot: gone quiet
-| o homelab                        7s    |  <- green dot: finished its turn
+||########## env_monitoring      14m ####|  filled red + pulsing: wants you now
+| o session-beacon                2m     |  blue: working
+| o factory-dynamics              6m     |  magenta: stopped on an API error
+| o bench-metrology              15m     |  amber: busy but gone quiet
+| o homelab                       7s     |  green: finished its turn
 |                                        |
 |----------------------------------------|
-| ctx 41% [####......]          opus5    |  <- alternates every 4s with:
-| 5h  92% [#########.]       7d  28%    |     your account's usage
+| ctx  73% [#######...]         opus5    |  <- 4s
+| 5h   92% [#########.]      7d  28%     |  -> 4s
 +----------------------------------------+
 ```
+
+The bar down the far left of the top row marks the session the footer's context
+page is describing. The footer alternates every four seconds between that session
+and your account's rolling five-hour and seven-day usage.
 
 State is carried by colour rather than a word, and the elapsed time is how long a
 session has been in that state. The one that wants you fills its whole row and
