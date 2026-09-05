@@ -63,13 +63,15 @@ These are the settings that produced the parts that fit.
 | Layer height | 0.10 mm, the stock **DETAIL** preset |
 | Material | PLA |
 
-Treat the layer height as part of the fit, not as a finish preference. A box this size
-does not need 0.10 mm for strength, and these parts were fine-tuned until they fitted
-at this setting, so a coarser layer is a change to the tolerances rather than just a
-faster print. If a reprint comes out tight, suspect that before reaching for the model.
+**Orientation:** largest flat face down for each part. **Supports:** none. The geometry
+makes both obvious; there is no overhang to argue about.
 
-Orientation and supports were not recorded. Shallow plates printed flat with no
-supports is the obvious reading, but nobody wrote it down, so it is a guess.
+**0.10 mm is the only layer height that has been tried.** It is not known to be
+necessary. The parts are small enough that a finer layer costs little time, so there
+was never a reason to experiment, and the fit was tuned at this setting. Whether 0.15
+or 0.20 mm also fits is simply untested. If you print coarser and something binds, come
+back to 0.10 before suspecting the model, since that is the only combination known to
+work.
 
 ## Versioning
 
