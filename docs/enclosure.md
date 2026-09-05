@@ -30,7 +30,10 @@ elephant's foot on the first layer.
 
 ## Assembly constraints
 
+![Inside the case](../photos/assembly1.jpg)
+
 The case is tight, and three things follow from that. None of them are preferences.
+Everything below is visible in the photo above.
 
 **The Arduino must be the headerless board, ABX00092.** Not ABX00083, which is the same
 board with pin headers already soldered on. The two are otherwise identical, so it is an

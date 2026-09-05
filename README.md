@@ -4,6 +4,13 @@ A small USB-attached status light for Claude Code. It shows, at a glance, every 
 
 The problem it solves: with three or four VS Code windows each running Claude Code, it is easy to leave one session blocked on a permission prompt for twenty minutes without noticing. Desktop notifications get lost or dismissed. A dedicated physical display does not.
 
+![The finished beacon](photos/sessions_beacon.jpg)
+
+Two sessions on screen. `bench-metrology` last changed state seven hours ago,
+`session-beacon` five minutes ago. The bar down the left of the top row marks the
+session the footer is describing, which here has used 73% of its context window on
+Opus 5. The header totals spend across every live session.
+
 ---
 
 ## Hardware
@@ -17,7 +24,23 @@ The problem it solves: with three or four VS Code windows each running Claude Co
 | 4x M2 x 12 hex-head screws + 4x M2 nuts | Through the stack |
 | 26 AWG silicone hookup wire, tinned copper | Eight conductors, soldered direct to the display's bent-over header. Silicone is required, not preferred: PVC is stiff enough to lift the board out of its retaining ridges |
 
-Wiring is carried over from the `env_monitoring` firmware and needs no passives or level shifting: eight conductors, all 3.3 V. See [docs/hardware.md](docs/hardware.md) for the pinout and bring-up procedure, and [docs/enclosure.md](docs/enclosure.md) for the case and the full bill of materials.
+Wiring is carried over from the `env_monitoring` firmware and needs no passives or
+level shifting: eight conductors, all 3.3 V. See
+[docs/hardware.md](docs/hardware.md) for the pinout and bring-up procedure, and
+[docs/enclosure.md](docs/enclosure.md) for the case and the full bill of materials.
+
+![Inside the case](photos/assembly1.jpg)
+
+The open case shows why three items in that list are requirements rather than
+preferences. The Arduino is the headerless board, so its pads are bare and the printed
+ridges can close directly onto the PCB to retain it. The display's eight-pin header is
+bent flat against the board with wires soldered straight to it, because a socket would
+not fit under the lid. And the wire is silicone: one jacket is printed `200 C`, which is
+the rating that stops it shrinking back from the iron on leads this short.
+
+![Soldering under a magnifier](photos/assembly0.jpg)
+
+Soldering the bent header. Eight joints on 2.54 mm pitch, done under a magnifier lamp.
 
 ---
 
@@ -108,6 +131,7 @@ host/                     Python daemon: hook receiver, state, serial link
 hooks/                    Example Claude Code settings, plus a payload capture tool
 scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
 enclosure/                3MF source for the three printed parts
+photos/                   Build and finished-device photos
 docs/                     Architecture, hardware, enclosure, protocol, integration, roadmap
 ```
 
