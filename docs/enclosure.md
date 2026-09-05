@@ -1,13 +1,28 @@
 # Enclosure
 
 Three printed parts that sandwich the board and display, held together by four screws
-through the stack. Source files are in [`enclosure/`](../enclosure) as 3MF.
+through the stack. Everything is in [`enclosure/`](../enclosure).
 
-| Part | File | Footprint | Depth |
-|------|------|-----------|-------|
-| Front | `front-v0.3MF` | 40 x 60 mm | 5.0 mm |
-| Mid | `mid-v0.3MF` | 40 x 60 mm | 8.0 mm |
-| Back | `back-v0.3MF` | 40 x 60 mm | 6.0 mm |
+| Part | Footprint | Depth |
+|------|-----------|-------|
+| Front | 40 x 60 mm | 5.0 mm |
+| Mid | 40 x 60 mm | 8.0 mm |
+| Back | 40 x 60 mm | 6.0 mm |
+
+### Which file to open
+
+Each part ships in three formats. They are not redundant; they serve different jobs.
+
+| Format | What it is | Reach for it to |
+|--------|------------|-----------------|
+| `.SLDPRT` | SolidWorks 2026 source, with the feature history intact | Edit the design the way it was designed. Needs SolidWorks |
+| `.STEP` | Neutral solid geometry, AP214 | Open and modify anywhere: FreeCAD, Fusion, Onshape, Blender. No feature history, so it arrives as a dumb solid |
+| `.3MF` | Mesh | Slice and print. This is the one to hand your slicer |
+
+**Print from the 3MF. Modify from the STEP unless you own SolidWorks.** The STEP is
+the format that makes this project actually forkable: a dumb solid is still real
+geometry you can cut, extend and re-export, which a mesh is not. If you are adapting
+the case for a different board, that is where to start.
 
 Stacked depth is 19 mm. The footprint is smaller than the bare display module, which is
 56 mm on its long edge, because the panel overhangs its own PCB.
@@ -131,6 +146,12 @@ leave the port as an exercise. Open an issue if you would use it.
 ## Versioning
 
 Files are suffixed `-v0`. That is the revision that was fitted and works. If a part is
-revised, add `-v1` rather than overwriting: 3MF is a binary container, so git can store
-it but cannot show you what changed between two versions. Keeping the old file is the
-only practical way to compare or fall back.
+revised, add `-v1` rather than overwriting, and revise all three formats together so
+they cannot drift apart.
+
+The reason for keeping old versions rather than relying on history: none of these
+formats diff usefully. SolidWorks parts are binary containers, and while STEP is
+technically a text format, a diff of a few thousand renumbered geometry entities tells
+you nothing. Git can store all of them faithfully; it just cannot tell you what
+changed. An old file sitting next to the new one is the only practical way to compare
+or fall back.

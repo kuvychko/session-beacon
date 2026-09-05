@@ -20,7 +20,7 @@ Opus 5. The header totals spend across every live session.
 | Arduino Nano ESP32, **headerless** | ABX00092, not the headered ABX00083. ESP32-S3, native USB CDC, 3.3 V logic. Overkill for this: Wi-Fi is never used, and an RP2040-Zero would be cheaper if you redesign the case |
 | 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
-| Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. 3MF in [`enclosure/`](enclosure) |
+| Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. SolidWorks, STEP and 3MF in [`enclosure/`](enclosure) |
 | 4x M2 x 12 hex-head screws + 4x M2 nuts | Through the stack |
 | 26 AWG silicone hookup wire, tinned copper | Eight conductors, soldered direct to the display's bent-over header. Silicone is required, not preferred: PVC is stiff enough to lift the board out of its retaining ridges |
 
@@ -130,7 +130,8 @@ constrains what you do with it.
 Wi-Fi and Bluetooth are most of what you pay for and the project uses neither, by
 design. A Waveshare RP2040-Zero would be cheaper and smaller. If there is enough
 interest, I am willing to test that board and design a dedicated enclosure for it.
-Say so in an issue. What a port involves is written up in
+Say so in an issue. The case is published as STEP as well as mesh, so a redesign does
+not depend on owning SolidWorks or on waiting for me. What a port involves is written up in
 [docs/enclosure.md](docs/enclosure.md#if-you-were-starting-from-scratch).
 
 ## Repository layout
@@ -142,7 +143,7 @@ host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Example Claude Code settings, plus a payload capture tool
 scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
-enclosure/                3MF source for the three printed parts
+enclosure/                Three printed parts: SolidWorks source, STEP, and 3MF
 photos/                   Build and finished-device photos
 docs/                     Architecture, hardware, enclosure, protocol, integration, roadmap
 ```

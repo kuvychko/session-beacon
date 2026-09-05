@@ -1,11 +1,19 @@
-# 3MF is a ZIP container and every other entry here is compressed or encoded.
-# Line-ending normalisation would corrupt them, and diffing them is meaningless.
-# Git's own binary detection would probably catch these, but "probably" is not a
+# Design and image files: never normalise line endings, never try to diff them.
+# Git's own binary detection would catch most of these, but "probably" is not a
 # good property for the only copy of a part that has been fitted and works.
-*.3mf   binary
-*.3MF   binary
-*.stl   binary
-*.step  binary
-*.png   binary
-*.jpg   binary
-*.jpeg  binary
+#
+# STEP is the odd one: ISO 10303-21 is a text format, so git could diff it. It is
+# marked binary anyway. A diff of a few thousand renumbered CARTESIAN_POINT lines
+# tells you nothing, and freezing the bytes keeps the file identical to what the
+# CAD tool exported.
+*.3mf     binary
+*.3MF     binary
+*.sldprt  binary
+*.SLDPRT  binary
+*.step    binary
+*.STEP    binary
+*.stl     binary
+*.STL     binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
