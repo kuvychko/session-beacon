@@ -36,6 +36,12 @@ the account's five-hour and seven-day usage. Both pages share the same field
 positions so nothing jumps. Reset timestamps are available in the payload but not
 yet shown; the percentage is the actionable number and there is no room for both.
 
+### Enclosure ~~(TBD)~~ **done**
+
+Three printed parts, fitted, in `enclosure/` as 3MF. The print settings that made
+v0 fit were never written down, which is the one loose end: see
+[enclosure.md](enclosure.md).
+
 ## Phase 3: Nice to have
 
 - Small piezo or LED for an audible or peripheral-vision cue on `NEEDS_INPUT`. The screen alone may not be enough when looking at another monitor.

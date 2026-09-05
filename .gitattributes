@@ -1,0 +1,11 @@
+# 3MF is a ZIP container and every other entry here is compressed or encoded.
+# Line-ending normalisation would corrupt them, and diffing them is meaningless.
+# Git's own binary detection would probably catch these, but "probably" is not a
+# good property for the only copy of a part that has been fitted and works.
+*.3mf   binary
+*.3MF   binary
+*.stl   binary
+*.step  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary

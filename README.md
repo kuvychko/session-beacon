@@ -13,8 +13,11 @@ The problem it solves: with three or four VS Code windows each running Claude Co
 | Arduino Nano ESP32 | ESP32-S3, native USB CDC serial, 3.3 V logic |
 | 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
+| Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. 3MF in [`enclosure/`](enclosure) |
+| 4x M2 x 12 hex-head screws + 4x M2 nuts | Through the stack |
+| 26 AWG hookup wire, soft insulation | Eight conductors. Jumper wire is too stiff to fit |
 
-Wiring is carried over from the `env_monitoring` firmware and needs no passives or level shifting: eight jumper wires, all 3.3 V. See [docs/hardware.md](docs/hardware.md) for the pinout and the bring-up procedure.
+Wiring is carried over from the `env_monitoring` firmware and needs no passives or level shifting: eight conductors, all 3.3 V. See [docs/hardware.md](docs/hardware.md) for the pinout and bring-up procedure, and [docs/enclosure.md](docs/enclosure.md) for the case and the full bill of materials.
 
 ---
 
@@ -89,7 +92,8 @@ handles all the paths they could arrive by, but triggering one needs an
 interactive permission prompt, which a scripted run cannot produce. Everything
 around it is confirmed; that one signal is still reasoning rather than evidence.
 
-Remaining work is comfort rather than function: see
+The enclosure is printed and fitted, so it is a finished object rather than a
+breadboard. Remaining work is comfort rather than function: see
 [docs/roadmap.md](docs/roadmap.md).
 
 ---
@@ -103,7 +107,8 @@ host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Example Claude Code settings, plus a payload capture tool
 scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
-docs/                     Architecture, hardware, protocol, integration, roadmap
+enclosure/                3MF source for the three printed parts
+docs/                     Architecture, hardware, enclosure, protocol, integration, roadmap
 ```
 
 ---
