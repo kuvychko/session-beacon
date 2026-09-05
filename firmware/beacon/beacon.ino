@@ -51,8 +51,8 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RS
 //
 // This panel is wired BGR, so the library's default for INITR_GREENTAB shows
 // red and blue swapped. Confirmed on the bench with the colour chart in
-// tft_smoketest. Note that the otherwise identical display in env_monitoring
-// is RGB, so this is a per-unit trait, not a property of the part number.
+// tft_smoketest. The env_monitoring display turned out to be BGR as well, so
+// expect BGR from this part, but verify rather than assume: the check is free.
 //
 // setRotation() is the only thing that writes MADCTL, so overriding it once
 // after setRotation() is enough. Any new setRotation() call must be followed

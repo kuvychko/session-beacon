@@ -11,7 +11,7 @@ The problem it solves: with three or four VS Code windows each running Claude Co
 | Part | Notes |
 |------|-------|
 | Arduino Nano ESP32 | ESP32-S3, native USB CDC serial, 3.3 V logic |
-| 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header. Same [JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF) as `env_monitoring`, but not the same panel: this one is BGR-wired and needs a colour-order fix the other does not. Check yours. |
+| 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
 
 Wiring is carried over from the `env_monitoring` firmware and needs no passives or level shifting: eight jumper wires, all 3.3 V. See [docs/hardware.md](docs/hardware.md) for the pinout and the bring-up procedure.

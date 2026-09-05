@@ -89,7 +89,11 @@ rather than clean: speckled pixels or a torn frame, not a blank screen. Lower
 
 ### Panel colour order
 
-**This unit is BGR-wired and needs a correction that `env_monitoring` did not.** With the library's defaults it renders red and blue swapped. The two displays came from the same product listing, so treat colour order as a per-unit trait to check on every new panel rather than a property of the part number.
+**This panel is BGR-wired.** With the library's defaults it renders red and blue swapped.
+
+An earlier version of this file said `env_monitoring`'s display did not need the same fix, and called colour order a per-unit trait. That was inferred from a code comment reading "Dark blue", never from looking at the screen, and it was wrong: that panel is BGR too and had been showing high CO2 readings in blue instead of red the whole time. Both panels from this listing have been BGR, so expect BGR.
+
+Still check a new panel rather than assuming, because the check is free: fill the screen with `0x000F` and see whether it comes out blue or red. Getting it wrong costs a warning colour that reads as a calm one.
 
 The Adafruit library exposes no API for this, so the fix is a direct write to the Memory Access Control register with the colour-order bit cleared:
 

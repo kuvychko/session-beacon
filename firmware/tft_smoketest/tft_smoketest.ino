@@ -48,8 +48,8 @@ static constexpr uint8_t MADCTL_BGR = 0x08;
 // What the library writes for INITR_GREENTAB at rotation 1: MY | MV | BGR.
 // This panel is BGR-wired, so with the library default red and blue come out
 // swapped. Clearing the BGR bit corrects it. Confirmed on the bench with the
-// colour chart below. The env_monitoring display is RGB despite the same part
-// number, so treat this as a per-unit trait.
+// colour chart below. The env_monitoring display turned out to be BGR too, so
+// expect BGR from this listing, but still verify: the check is free.
 static constexpr uint8_t MADCTL_LIB_ROT1 = 0xA8;
 static constexpr uint8_t MADCTL_ROT1_RGB = MADCTL_LIB_ROT1 & ~MADCTL_BGR;
 
