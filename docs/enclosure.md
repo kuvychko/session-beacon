@@ -37,7 +37,7 @@ elephant's foot on the first layer.
 |-----|------|-------|
 | 1 | Arduino Nano ESP32, **headerless** | **ABX00092**, not ABX00083. See below |
 | 1 | 1.8" TFT, 128x160, ST7735S, 3.3 V, SPI, 8-pin | [JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Expect BGR wiring; see [hardware.md](hardware.md#panel-colour-order) |
-| 4 | M2 x 16 socket-head cap screws | Through the stack. **Not 12 mm**, see below |
+| 4 | M2 x 16 socket-head cap screws | Counter-sunk into the stack; see below on length |
 | 4 | M2 nuts | |
 | 1 | USB-C cable, data and power | Nothing else connects to the outside |
 | 8 | 26 AWG **silicone**-insulated hookup wire, stranded tinned copper | Board to display. Sold as "Flexible 26 Gauge Silicone Hook up Wire Kit, Electrical Tinned Copper Wire" |
@@ -50,17 +50,13 @@ elephant's foot on the first layer.
 The case is tight, and four things follow from that. None of them are preferences.
 Everything below is visible in the photo above.
 
-**The screws are 16 mm, not 12 mm.** Machine screw length is measured under the head,
-so the stated length is the shank alone. The socket head adds about 2.5 mm on these:
+**Screw length is quoted under the head.** M2 x 16 means 16 mm of shank; the socket
+head adds roughly 2.5 mm on top, for about 18.5 mm overall. Both the head and the nut
+are counter-sunk into their parts, so the whole fastener disappears inside the 19 mm
+stack with about half a millimetre to spare and nothing protrudes from either face.
 
-| Screw | Shank + head | Against a 19 mm stack |
-|-------|--------------|-----------------------|
-| M2 x 12 | 14.5 mm | 4.5 mm short |
-| M2 x 16 | 18.5 mm | fits, 0.5 mm to spare |
-
-Both the head and the nut are counter-sunk into their parts, so the whole fastener
-disappears inside the 19 mm and nothing protrudes from either face. That is why the
-fit is as tight as it is: 16 mm is not approximately right, it is the size that works.
+Do not size the screw to the 19 mm stack. That convention is the trap: a 19 or 20 mm
+screw is too long, not flush.
 
 Socket head rather than hex head, so a driver reaches down into the counterbore
 instead of needing side clearance for a wrench.
