@@ -12,10 +12,12 @@ Runs in a daemon thread. The main loop drains the queue.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import queue
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 from .statusline import compose
 
@@ -25,9 +27,11 @@ MAX_BODY = 1 << 20  # 1 MiB; statusline payloads are small, cap the rest
 
 
 class _Handler(BaseHTTPRequestHandler):
-    q: queue.Queue           # set by start()
-    device_ok: bool = False  # updated by the main loop, read here
-    stats: dict = {}         # ditto; whole-dict replacement keeps this atomic
+    q: queue.Queue                       # set by start()
+    device_ok: bool = False              # updated by the main loop, read here
+    # Deliberately shared across every request: the main loop swaps the whole
+    # dict, so readers see one consistent snapshot without locking.
+    stats: ClassVar[dict] = {}
 
     protocol_version = "HTTP/1.1"
 
@@ -43,23 +47,22 @@ class _Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         kind = {"/event": "event", "/status": "status"}.get(self.path)
         if kind is None:
             self._send(404)
             return
 
         raw = self._read_body()
+        # A malformed body is dropped; a hook must never see an error.
         payload = None
-        try:
+        with contextlib.suppress(ValueError, UnicodeDecodeError):
             payload = json.loads(raw)
-        except Exception:
-            pass
         if isinstance(payload, dict):
-            try:
+            # Drop rather than block. A hook waiting on this would stall the
+            # Claude Code session that fired it.
+            with contextlib.suppress(queue.Full):
                 self.q.put_nowait((kind, payload))
-            except queue.Full:
-                pass  # never block a hook
 
         if kind == "status":
             text = compose(payload, type(self).device_ok) if isinstance(payload, dict) else ""
@@ -67,7 +70,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._send(204)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path != "/health":
             self._send(404)
             return

@@ -24,7 +24,8 @@ FIXTURES = Path(__file__).parent / "fixtures" / "hook_payloads.jsonl"
 
 
 def load() -> dict[str, dict]:
-    payloads = [json.loads(l) for l in FIXTURES.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = FIXTURES.read_text(encoding="utf-8").splitlines()
+    payloads = [json.loads(line) for line in lines if line.strip()]
     return {p["hook_event_name"]: p for p in payloads}
 
 
@@ -71,16 +72,39 @@ def test_real_lifecycle_drives_the_expected_states(events):
 
 
 def test_real_post_tool_use_marks_work_and_records_the_tool(events):
-    """PostToolUse arrives from a subdirectory, so it also exercises the label
-    resolution that previously displayed this repo as "host"."""
+    """Everything in the payload that does not touch the filesystem."""
     store = SessionStore()
     p = events["PostToolUse"]
     store.apply_event(p, 0)
     s = store.sessions[p["session_id"]]
     assert s.state == State.WORKING
     assert s.last_tool == "Bash"
-    assert s.cwd.endswith("host")
-    assert s.label == "session-beacon"
+    assert s.permission_mode == "auto"
+    # The captured cwd is a subdirectory of the repo, which is what makes the
+    # label test below worth doing.
+    assert s.cwd.replace("\\", "/").endswith("/host")
+
+
+def test_real_payload_label_resolves_to_the_repository(events, tmp_path):
+    """The captured cwd is a real absolute path from the machine that recorded
+    it, and label resolution walks the filesystem looking for a `.git`. Replaying
+    the payload as-is therefore passes only on that one machine: anywhere else
+    the path does not exist, the walk finds nothing, and the label falls back to
+    the directory basename `host`.
+
+    So rebuild that shape under tmp_path and repoint the payload at it. The code
+    path exercised is identical; the filesystem it walks is now the test's own.
+    """
+    repo = tmp_path / "session-beacon"
+    (repo / ".git").mkdir(parents=True)
+    sub = repo / "host"
+    sub.mkdir()
+
+    payload = {**events["PostToolUse"], "cwd": str(sub)}
+    store = SessionStore()
+    store.apply_event(payload, 0)
+
+    assert store.sessions[payload["session_id"]].label == "session-beacon"
 
 
 def test_fixtures_carry_no_conversation_content(events):

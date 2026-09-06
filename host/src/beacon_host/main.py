@@ -11,6 +11,7 @@ the device when something changed or a second has passed.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import logging.handlers
@@ -43,7 +44,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help="append redacted hook payloads to FILE as JSONL, "
                          "for building test fixtures")
     ap.add_argument("-v", "--verbose", action="store_true", help="debug logging")
-    ap.add_argument("--dry-run", action="store_true", help="print snapshots instead of using serial")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print snapshots instead of using serial")
     return ap.parse_args(argv)
 
 
@@ -96,11 +98,11 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> 
         log.info("signal %s, shutting down", signum)
         stopping = True
 
+    # Not on the main thread, or unsupported on this platform: either way the
+    # daemon still runs, it just will not shut down cleanly on a signal.
     for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
+        with contextlib.suppress(ValueError, OSError):
             signal.signal(sig, stop)
-        except (ValueError, OSError):
-            pass  # not on the main thread, or unsupported on this platform
 
     q: queue.Queue = queue.Queue(maxsize=10_000)
     try:

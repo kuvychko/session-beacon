@@ -65,8 +65,10 @@ def redact(payload: dict[str, Any]) -> dict[str, Any]:
         elif k == "tool_input" and isinstance(v, dict):
             # Argument names are useful; argument values are the user's data.
             out[k] = {kk: _marker(vv) for kk, vv in v.items()}
-        elif k != "cwd" and (k.endswith("_path") or k.endswith("_dir")) and isinstance(v, str):
-            out[k] = f"<path>/{os.path.basename(v.rstrip('/\\\\'))}"
+        elif k != "cwd" and k.endswith(("_path", "_dir")) and isinstance(v, str):
+            # Normalise separators first, so this is a plain trailing-slash trim
+            # rather than a multi-character strip that reads like a substring.
+            out[k] = f"<path>/{os.path.basename(v.replace('\\\\', '/').rstrip('/'))}"
         else:
             out[k] = v
     return out

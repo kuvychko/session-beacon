@@ -2,9 +2,12 @@
 
 Phases are ordered so that each one produces something visibly useful on the desk. Estimates are rough and assume Claude Code does most of the typing.
 
+**Where this stands: phases 0 and 1 are complete and the device is in daily use.**
+Most of phase 2 is done as well. What is left is listed under "still open" below.
+
 ## Phase 0: Scoping (done)
 
-Docs, repo layout, protocol, skeletons. This is where the repo stands now.
+Docs, repo layout, protocol, skeletons.
 
 ## Phase 1: Blink the beacon
 
@@ -21,13 +24,25 @@ Exit criteria: leaving a session on a permission prompt turns its row red within
 
 ## Phase 2: Make it a daily driver
 
-- Auto-detect COM port by VID/PID; reconnect after reflash or unplug.
-- Run at login (Task Scheduler, `pythonw`), log to a rotating file.
-- Cost and context percent in the footer from the statusline payload.
-- Last tool name per row.
-- Blink and stale handling polished; overflow count when more than six sessions.
-- Label overrides in config.
-- Backlight on PWM pin, dim after N minutes of all-idle.
+Done:
+
+- ~~Auto-detect COM port by VID/PID; reconnect after reflash or unplug.~~
+- ~~Run at login (Task Scheduler, `pythonw`), log to a rotating file.~~ The script
+  exists as `scripts/install-task.ps1`; installing it is a per-machine step.
+- ~~Cost and context percent in the footer from the statusline payload.~~
+- ~~Blink and stale handling polished.~~
+- ~~Label overrides in config.~~ Keyed by repo root or exact directory.
+
+Still open:
+
+- **Last tool name per row.** The host already records it and the protocol carries a
+  `tool` field; nothing draws it. There is no room on a row without giving up label
+  width, so it needs a layout decision rather than plumbing.
+- **Overflow indicator for more than six sessions.** The host sorts and truncates
+  correctly and the header's active count reveals the overflow, but nothing says
+  "there are more below".
+- **Backlight on a PWM pin, dimming after some minutes of all-idle.** Needs one wire
+  moved from 3V3 to a PWM-capable pin, so it is a hardware change, not just firmware.
 
 ### Account-level rate limits ~~(unbuilt)~~ **done**
 
@@ -38,8 +53,8 @@ yet shown; the percentage is the actionable number and there is no room for both
 
 ### Enclosure ~~(TBD)~~ **done**
 
-Three printed parts, fitted, in `enclosure/` as 3MF, with print settings and the
-full bill of materials in [enclosure.md](enclosure.md).
+Three printed parts, fitted, in `enclosure/` as SolidWorks source, STEP and 3MF,
+with print settings and the full bill of materials in [enclosure.md](enclosure.md).
 
 ## Phase 3: Nice to have
 

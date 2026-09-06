@@ -10,10 +10,13 @@ curl call: curl POSTs the payload and prints the response body verbatim.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 from .state import extract_ctx_pct
+
+log = logging.getLogger(__name__)
 
 
 def compose(st: dict[str, Any], device_ok: bool) -> str:
@@ -44,5 +47,10 @@ def compose(st: dict[str, Any], device_ok: bool) -> str:
         parts.append("beacon" if device_ok else "beacon?")
 
         return "  ".join(parts)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        # Deliberately blind. The payload is arbitrary JSON from another
+        # process, so a wrong shape can raise almost anything, and this runs
+        # inside the HTTP handler for a hook: raising would put a traceback
+        # where the status line should be.
+        log.debug("could not compose status line: %s", e)
         return ""

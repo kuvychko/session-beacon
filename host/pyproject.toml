@@ -25,3 +25,28 @@ packages = ["src/beacon_host"]
 
 [tool.ruff]
 line-length = 100
+target-version = "py312"
+
+# Pinned explicitly so `ruff check` gives the same answer on every machine and
+# in CI, rather than tracking whatever the installed ruff happens to default to.
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import sorting
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "SIM",       # simplify
+    "C4",        # comprehensions
+    "PIE",       # misc lints
+    "RUF",       # ruff-specific
+    "S",         # bandit
+    "BLE",       # blind except
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Asserting is what a test does, and a test binding a localhost port is the
+# point of the test rather than a finding.
+# S101: asserting is what a test does.
+# S310: these open http://127.0.0.1 URLs against the test's own server.
+"tests/*" = ["S101", "S310"]

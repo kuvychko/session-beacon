@@ -97,8 +97,14 @@ def test_ctx_pct_from_statusline():
     assert s.ctx_pct == 62 and s.model == "opus5" and s.cost_usd == 1.5
 
 
-def test_ctx_pct_falls_back_to_token_counts():
-    """used_percentage is null early in a session and after a compaction."""
+def test_ctx_pct_falls_back_to_input_tokens_only():
+    """used_percentage is null early in a session and after a compaction.
+
+    The fallback counts input tokens only. Output is excluded: everything the
+    model has already said comes back as input on the next call, so adding
+    total_output_tokens double-counts all but the most recent reply. Here that
+    is 40000/200000, not 50000/200000.
+    """
     st = SessionStore()
     st.apply_status({
         "session_id": "x",
@@ -109,7 +115,13 @@ def test_ctx_pct_falls_back_to_token_counts():
             "context_window_size": 200000,
         },
     }, 0)
-    assert st.sessions["x"].ctx_pct == 25
+    assert st.sessions["x"].ctx_pct == 20
+
+
+def test_ctx_pct_is_none_when_nothing_usable_is_present():
+    st = SessionStore()
+    st.apply_status({"session_id": "x", "context_window": {"used_percentage": None}}, 0)
+    assert st.sessions["x"].ctx_pct is None
 
 
 def test_permission_mode_captured():

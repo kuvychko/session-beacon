@@ -90,7 +90,12 @@ statusline carries:
 
 Both a percentage and a reset time, for the rolling five-hour and seven-day windows.
 That is the "high-level usage stats" this project was scoped around and assumed it
-could not have. Nothing displays it yet; see the roadmap.
+could not have. The footer now alternates every four seconds between the featured
+session's context window and these account figures; see
+[architecture.md](architecture.md#the-footer-alternates). Only the percentages are
+forwarded to the device. The reset timestamps are in the payload and are not used,
+because a 26-character line has no room for both and the percentage is the number
+that changes what you do.
 
 The same payload also carries `version`, `exceeds_200k_tokens`, `session_name`,
 `fast_mode`, `output_style`, `thinking`, `prompt_cache`, and richer `cost` fields
@@ -173,5 +178,5 @@ committed fixtures contain no usernames or unredacted text.
 ## Still to confirm
 
 1. Trigger a real permission prompt with the daemon capturing, to confirm whether attention arrives as a `PermissionRequest` event, a `Notification` carrying `notification_type`, or both. The state machine handles all three paths, so it should work either way, but that is reasoning rather than evidence.
-2. Capture a statusline payload. The cost and context fields are still schema-derived, and `context_window.used_percentage` is documented as null early in a session and after a `/compact`, which is worth watching for directly.
+2. ~~Capture a statusline payload.~~ **Done.** Captured and confirmed: `used_percentage` 54 against a `context_window_size` of 1000000, `model.display_name` `Opus 5`, and `rate_limits` present. What is still unobserved is the null case: `used_percentage` is documented as null early in a session and after a `/compact`, and the input-token fallback that covers it has only ever been exercised by unit tests.
 3. Watch a `StopFailure` land, most easily during a rate limit.

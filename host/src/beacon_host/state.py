@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
-from enum import Enum
 from typing import Any
 
 
-class State(str, Enum):
+class State(StrEnum):
     STARTING = "start"
     WORKING = "work"
     NEEDS_INPUT = "need"
@@ -184,7 +184,8 @@ class SessionStore:
     def _get_or_create(self, sid: str, cwd: str, now: float) -> Session:
         s = self.sessions.get(sid)
         if s is None:
-            s = Session(session_id=sid, cwd=cwd, label=self._label(cwd), state_since=now, last_event=now)
+            s = Session(session_id=sid, cwd=cwd, label=self._label(cwd),
+                        state_since=now, last_event=now)
             self.sessions[sid] = s
         elif cwd and cwd != s.cwd:
             # Recompute rather than keep the first value seen. A session's cwd
@@ -265,7 +266,7 @@ def extract_rate_limits(st: dict[str, Any]) -> dict[str, int]:
     for key, short in (("five_hour", "h5"), ("seven_day", "d7")):
         v = (rl.get(key) or {}).get("used_percentage")
         if isinstance(v, (int, float)):
-            out[short] = max(0, min(100, int(round(v))))
+            out[short] = max(0, min(100, round(v)))
     return out
 
 
@@ -280,9 +281,21 @@ def extract_ctx_pct(st: dict[str, Any]) -> int | None:
     pct = cw.get("used_percentage")
     if isinstance(pct, (int, float)):
         return int(pct)
+
+    # Input tokens only. `total_input_tokens` already includes cache reads and
+    # writes, and everything the model has previously said is resent as input,
+    # so it is the figure that describes how full the window is. Adding output
+    # would double-count all but the last reply.
+    #
+    # The published field table does not spell out the formula, but it defines
+    # `exceeds_200k_tokens` as input, cache and output "combined" and pointedly
+    # does not say that for `used_percentage`. Real payloads cannot settle it
+    # either way: output is a few hundred tokens against half a million input,
+    # so both formulas round to the same integer.
     size = cw.get("context_window_size")
-    tokens = [cw.get("total_input_tokens"), cw.get("total_output_tokens")]
-    used = sum(t for t in tokens if isinstance(t, (int, float)))
+    used = cw.get("total_input_tokens")
+    if not isinstance(used, (int, float)):
+        used = 0
     if used and isinstance(size, (int, float)) and size > 0:
         return int(100 * used / size)
     return None

@@ -162,26 +162,75 @@ docs/                     Architecture, hardware, enclosure, protocol, integrati
 
 ## Quick start
 
-```powershell
-# 0. Wire the display per docs/hardware.md, then flash firmware/tft_smoketest to check it
+Every path below is relative to the **repository root**. The daemon runs in the
+foreground and never exits on its own, so it needs a terminal of its own.
 
-# 1. Flash the firmware
+### 1. Build the device
+
+Wire the display per [docs/hardware.md](docs/hardware.md), then flash
+`firmware/tft_smoketest` and work through the bring-up checks before going near
+the real firmware. When the colours and geometry look right:
+
+```powershell
 $cli = "$env:LOCALAPPDATA\Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe"
 & $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
 & $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
+& $cli board list    # if COM4 is wrong
+```
 
-# 2. Run the host
-cd host; uv sync
-uv run beacon-host --dry-run -v      # sanity check without the board
-uv run beacon-host                   # auto-detects the board by USB id
+The display should now read `no host`, which is correct: nothing is talking to
+it yet.
 
-# 3. Install the Claude Code hooks, then RESTART your Claude Code sessions.
-#    Without this the daemon runs happily and reports zero sessions forever.
-./scripts/install-hooks.ps1 -WithStatusLine   # omit the switch to keep your own status line
-curl.exe -s http://127.0.0.1:47391/health   # events_received should climb
+### 2. Install the host software
 
-# 4. Optional: start the daemon automatically at logon
-./scripts/install-task.ps1
+```powershell
+cd host
+uv sync
+uv run pytest                        # 38 tests, no hardware needed
+uv run beacon-host --dry-run -v      # prints snapshots, Ctrl-C to stop
+cd ..
+```
+
+### 3. Terminal 1: start the daemon and leave it running
+
+```powershell
+cd host
+uv run beacon-host                   # finds the board by USB id; blocks until Ctrl-C
+```
+
+The display should switch from `no host` to `no sessions`. That is the daemon
+talking to the device with nothing yet to report.
+
+**Leave this running.** Everything below happens in a second terminal.
+
+### 4. Terminal 2: install the hooks
+
+```powershell
+cd C:\path\to\session-beacon        # repository root, not host/
+./scripts/install-hooks.ps1 -WithStatusLine
+```
+
+Omit `-WithStatusLine` to keep a status line you already have, at the cost of
+the cost and context figures, which arrive only through that hook.
+
+**Now restart your Claude Code sessions.** Hooks are read when a session starts,
+so nothing reaches the daemon until you do. This is the step people miss.
+
+```powershell
+curl.exe -s http://127.0.0.1:47391/health
+```
+
+`events_received` should climb as you use Claude Code, and the display should
+show a row per session.
+
+### 5. Optional: survive a reboot
+
+The daemon in Terminal 1 dies when you close that window. To have it start at
+logon instead, with no console:
+
+```powershell
+./scripts/install-task.ps1           # from the repository root
+Start-ScheduledTask -TaskName SessionBeacon
 ```
 
 To undo all of it, including the hooks, the scheduled task, the running daemon

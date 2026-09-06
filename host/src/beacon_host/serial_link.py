@@ -102,6 +102,6 @@ class SerialLink:
         if self._ser:
             try:
                 self._ser.close()
-            except Exception:
-                pass
+            except (serial.SerialException, OSError) as e:
+                log.debug("error closing port, dropping it anyway: %s", e)
         self._ser = None

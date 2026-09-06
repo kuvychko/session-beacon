@@ -22,7 +22,7 @@ class Config:
     source: Path | None = None        # which file this came from, for logging
 
     @classmethod
-    def load(cls, path: str | Path | None) -> "Config":
+    def load(cls, path: str | Path | None) -> Config:
         """Read a TOML config. A missing file is not an error; defaults apply."""
         cfg = cls()
         if path is None:
