@@ -4,12 +4,13 @@ A small USB-attached status light for Claude Code. It shows, at a glance, every 
 
 The problem it solves: with three or four VS Code windows each running Claude Code, it is easy to leave one session blocked on a permission prompt for twenty minutes without noticing. Desktop notifications get lost or dismissed. A dedicated physical display does not.
 
-![The finished beacon](photos/sessions_beacon.jpg)
+![The finished beacon](photos/sessions_beacon2.jpg)
 
-Two sessions on screen. `bench-metrology` last changed state seven hours ago,
-`session-beacon` five minutes ago. The bar down the left of the top row marks the
-session the footer is describing, which here has used 73% of its context window on
-Opus 5. The header totals spend across every live session.
+Two sessions on screen, in the 25-degree desk stand. `bench-metrology` last changed
+state six minutes ago, `session-beacon` thirty-two seconds ago. The bar down the left
+of the top row marks the session the footer is describing. The header totals spend
+across every live session; the footer is caught on its usage page, showing 38% of the
+rolling five-hour limit and 52% of the seven-day one.
 
 ---
 
@@ -21,6 +22,7 @@ Opus 5. The header totals spend across every live session.
 | 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
 | Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. SolidWorks, STEP and 3MF in [`enclosure/`](enclosure) |
+| Desk stand, 1 printed part, optional | Tilts the screen back 25 degrees. The case is a friction fit in the slot, so nothing fastens it |
 | 4x M2 x 16 socket-head screws + 4x M2 nuts | Head and nut both counter-sunk into the 19 mm stack. Length excludes the head, per the machine screw convention |
 | 26 AWG silicone hookup wire, tinned copper | Eight conductors, soldered direct to the display's bent-over header. Silicone is required, not preferred: PVC is stiff enough to lift the board out of its retaining ridges |
 
@@ -41,6 +43,13 @@ the rating that stops it shrinking back from the iron on leads this short.
 ![Soldering under a magnifier](photos/assembly0.jpg)
 
 Soldering the bent header. Eight joints on 2.54 mm pitch, done under a magnifier lamp.
+
+![The beacon in its stand, from the side](photos/sessions_beacon3.jpg)
+
+The stand seen from off-axis. Flat on the desk the screen points at the ceiling; 25
+degrees back is what makes it readable from a seated position. The case is a friction
+fit in the slot, so the stand is genuinely optional and nothing about the case depends
+on it.
 
 ---
 
@@ -153,7 +162,7 @@ host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Example Claude Code settings, plus a payload capture tool
 scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
-enclosure/                Three printed parts: SolidWorks source, STEP, and 3MF
+enclosure/                Three printed parts plus an optional stand: SolidWorks source, STEP, and 3MF
 photos/                   Build and finished-device photos
 docs/                     Architecture, hardware, enclosure, protocol, integration, roadmap
 ```

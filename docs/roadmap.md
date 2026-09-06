@@ -55,6 +55,8 @@ yet shown; the percentage is the actionable number and there is no room for both
 
 Three printed parts, fitted, in `enclosure/` as SolidWorks source, STEP and 3MF,
 with print settings and the full bill of materials in [enclosure.md](enclosure.md).
+An optional 25-degree desk stand is there too, printed and in use; the case is a
+friction fit in it and nothing fastens the two together.
 
 ## Phase 3: Nice to have
 

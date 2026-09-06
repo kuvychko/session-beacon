@@ -1,13 +1,15 @@
 # Enclosure
 
 Three printed parts that sandwich the board and display, held together by four screws
-through the stack. Everything is in [`enclosure/`](../enclosure).
+through the stack, plus an optional stand that tilts the finished case back 25 degrees.
+Everything is in [`enclosure/`](../enclosure).
 
 | Part | Footprint | Depth |
 |------|-----------|-------|
 | Front | 40 x 60 mm | 5.0 mm |
 | Mid | 40 x 60 mm | 8.0 mm |
 | Back | 40 x 60 mm | 6.0 mm |
+| 25-degree stand (optional) | 38 x 60 mm | 51 mm tall |
 
 ### Which file to open
 
@@ -42,6 +44,7 @@ elephant's foot on the first layer.
 | 1 | USB-C cable, data and power | Nothing else connects to the outside |
 | 8 | 26 AWG **silicone**-insulated hookup wire, stranded tinned copper | Board to display. Sold as "Flexible 26 Gauge Silicone Hook up Wire Kit, Electrical Tinned Copper Wire" |
 | 3 | Printed parts | `front`, `mid`, `back` from `enclosure/` |
+| 1 | Printed stand, optional | `25-degree-stand` from `enclosure/`. Nothing fastens it; see below |
 
 ## Assembly constraints
 
@@ -101,26 +104,54 @@ This is a requirement, not a nice-to-have. There is very little spare volume, th
 Wiring itself is unchanged from bring-up: eight conductors, no passives, no level
 shifting. The pinout is in [hardware.md](hardware.md#wiring).
 
+## The 25-degree stand
+
+![The case in the 25-degree stand](../photos/25-degree-stand-fit.jpg)
+
+Optional, and independent of everything above: the case is complete without it. Flat on
+the desk the screen points at the ceiling, which is fine if the beacon sits below eye
+level and wrong everywhere else. The stand tilts it back 25 degrees so the panel faces
+you from a normal seated position.
+
+It is one part: a single profile extruded 60 mm, which is the case's long edge.
+
+**The case is held by friction alone.** The body drops into the slot and stays there;
+there are no screws, no clips, and no features on the case that the stand engages. That
+follows from the clamshell being finished before the stand existed, and it is the reason
+the stand is a separate object rather than a revision of `back`: you can print one, not
+print one, or print a different one, without touching a case that already fits.
+
+A friction fit is a tolerance fit, so it is the one thing here that may not transfer
+between printers. If yours comes out loose, scale the slot rather than the part.
+
 ## Print settings
 
 These are the settings that produced the parts that fit.
 
-| | |
-|---|---|
-| Printer | Prusa i3 MK3S |
-| Nozzle | 0.4 mm |
-| Layer height | 0.10 mm, the stock **DETAIL** preset |
-| Material | PLA |
+| | Clamshell (`front`, `mid`, `back`) | Stand |
+|---|---|---|
+| Printer | Prusa i3 MK3S | Prusa i3 MK3S |
+| Nozzle | 0.4 mm | 0.4 mm |
+| Layer height | 0.10 mm, the stock **DETAIL** preset | 0.20 mm, the stock **SPEED** preset |
+| Material | PLA | PLA |
+| Infill | 20% | 15% |
+| Supports | none | none |
 
-**Orientation:** largest flat face down for each part. **Supports:** none. The geometry
-makes both obvious; there is no overhang to argue about.
+**Orientation:** largest flat face down for each part. The geometry makes it obvious;
+there is no overhang to argue about, on either the clamshell or the stand.
 
-**0.10 mm is the only layer height that has been tried.** It is not known to be
-necessary. The parts are small enough that a finer layer costs little time, so there
-was never a reason to experiment, and the fit was tuned at this setting. Whether 0.15
-or 0.20 mm also fits is simply untested. If you print coarser and something binds, come
-back to 0.10 before suspecting the model, since that is the only combination known to
-work.
+**0.10 mm is the only layer height the clamshell has been printed at.** It is not known
+to be necessary. The parts are small enough that a finer layer costs little time, so
+there was never a reason to experiment, and the fit was tuned at this setting. Whether
+0.15 or 0.20 mm also fits is simply untested. If you print coarser and something binds,
+come back to 0.10 before suspecting the model, since that is the only combination known
+to work.
+
+**Infill was not tuned.** The clamshell has only been printed at 20% and the stand only
+at 15%. Neither number was chosen; they are what the slicer was already set to. These
+are small solid-walled parts with no load path through the infill, so the two are very
+unlikely to differ in any way you could measure. Recorded here because it is what was
+actually run, not because it is a requirement.
 
 ## If you were starting from scratch
 
@@ -156,9 +187,9 @@ leave the port as an exercise. Open an issue if you would use it.
 
 ## Versioning
 
-Files are suffixed `-v0`. That is the revision that was fitted and works. If a part is
-revised, add `-v1` rather than overwriting, and revise all three formats together so
-they cannot drift apart.
+Every part is suffixed `-v0`, the stand included. That is the revision that was fitted
+and works. If a part is revised, add `-v1` rather than overwriting, and revise all three
+formats together so they cannot drift apart.
 
 The reason for keeping old versions rather than relying on history: none of these
 formats diff usefully. SolidWorks parts are binary containers, and while STEP is
