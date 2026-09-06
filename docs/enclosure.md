@@ -50,10 +50,20 @@ elephant's foot on the first layer.
 The case is tight, and four things follow from that. None of them are preferences.
 Everything below is visible in the photo above.
 
-**The screws are 16 mm, not 12 mm.** Against a 19 mm stack, a 12 mm screw does not
-reach far enough to engage its nut. This is the sort of thing that looks close enough
-on a parts list and then simply will not assemble. Socket head rather than hex head, so
-a driver reaches down into the recess instead of needing clearance for a wrench.
+**The screws are 16 mm, not 12 mm.** Machine screw length is measured under the head,
+so the stated length is the shank alone. The socket head adds about 2.5 mm on these:
+
+| Screw | Shank + head | Against a 19 mm stack |
+|-------|--------------|-----------------------|
+| M2 x 12 | 14.5 mm | 4.5 mm short |
+| M2 x 16 | 18.5 mm | fits, 0.5 mm to spare |
+
+Both the head and the nut are counter-sunk into their parts, so the whole fastener
+disappears inside the 19 mm and nothing protrudes from either face. That is why the
+fit is as tight as it is: 16 mm is not approximately right, it is the size that works.
+
+Socket head rather than hex head, so a driver reaches down into the counterbore
+instead of needing side clearance for a wrench.
 
 **The Arduino must be the headerless board, ABX00092.** Not ABX00083, which is the same
 board with pin headers already soldered on. The two are otherwise identical, so it is an

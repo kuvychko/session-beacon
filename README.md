@@ -21,7 +21,7 @@ Opus 5. The header totals spend across every live session.
 | 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
 | Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. SolidWorks, STEP and 3MF in [`enclosure/`](enclosure) |
-| 4x M2 x 16 socket-head screws + 4x M2 nuts | Through the 19 mm stack. 12 mm is too short to reach |
+| 4x M2 x 16 socket-head screws + 4x M2 nuts | Head and nut both counter-sunk into the 19 mm stack. Length excludes the head, so 12 mm is 4.5 mm short |
 | 26 AWG silicone hookup wire, tinned copper | Eight conductors, soldered direct to the display's bent-over header. Silicone is required, not preferred: PVC is stiff enough to lift the board out of its retaining ridges |
 
 Wiring is carried over from the `env_monitoring` firmware and needs no passives or
