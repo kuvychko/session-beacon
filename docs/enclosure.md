@@ -37,7 +37,7 @@ elephant's foot on the first layer.
 |-----|------|-------|
 | 1 | Arduino Nano ESP32, **headerless** | **ABX00092**, not ABX00083. See below |
 | 1 | 1.8" TFT, 128x160, ST7735S, 3.3 V, SPI, 8-pin | [JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Expect BGR wiring; see [hardware.md](hardware.md#panel-colour-order) |
-| 4 | M2 x 12 machine screws, hex head | Through the stack |
+| 4 | M2 x 16 socket-head cap screws | Through the stack. **Not 12 mm**, see below |
 | 4 | M2 nuts | |
 | 1 | USB-C cable, data and power | Nothing else connects to the outside |
 | 8 | 26 AWG **silicone**-insulated hookup wire, stranded tinned copper | Board to display. Sold as "Flexible 26 Gauge Silicone Hook up Wire Kit, Electrical Tinned Copper Wire" |
@@ -47,8 +47,13 @@ elephant's foot on the first layer.
 
 ![Inside the case](../photos/assembly1.jpg)
 
-The case is tight, and three things follow from that. None of them are preferences.
+The case is tight, and four things follow from that. None of them are preferences.
 Everything below is visible in the photo above.
+
+**The screws are 16 mm, not 12 mm.** Against a 19 mm stack, a 12 mm screw does not
+reach far enough to engage its nut. This is the sort of thing that looks close enough
+on a parts list and then simply will not assemble. Socket head rather than hex head, so
+a driver reaches down into the recess instead of needing clearance for a wrench.
 
 **The Arduino must be the headerless board, ABX00092.** Not ABX00083, which is the same
 board with pin headers already soldered on. The two are otherwise identical, so it is an

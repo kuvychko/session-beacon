@@ -179,6 +179,6 @@ The other two permutations cannot come from that flag. Red and green also occupy
 
 ## Enclosure
 
-Done, unlike `env_monitoring`, which never got past the breadboard. Three printed parts stacking to 19 mm on a 40 x 60 mm footprint, held by four M2 x 12 screws. Source files and the full bill of materials are in [enclosure.md](enclosure.md).
+Done, unlike `env_monitoring`, which never got past the breadboard. Three printed parts stacking to 19 mm on a 40 x 60 mm footprint, held by four M2 x 16 socket-head screws. Source files and the full bill of materials are in [enclosure.md](enclosure.md).
 
 One thing it changes about the wiring above: the enclosed build uses 26 AWG **silicone**-insulated stranded wire rather than the breadboard jumpers used for bring-up. Silicone has almost no memory, so it lies where it is put; PVC jumpers spring back hard enough to push the display off its seat and stop the case closing.
