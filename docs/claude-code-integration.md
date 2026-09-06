@@ -60,7 +60,12 @@ Hooks run synchronously and block the flow until the command exits, so the forwa
 
 ## Statusline for cost and context
 
-The statusline command receives JSON on stdin on every refresh. The fields the beacon uses:
+The statusline command receives JSON on stdin on every refresh. It is a *command*
+and only a command: `statusLine` accepts `"type": "command"` and no other kind in
+2.1.261, unlike hooks, which also take `http`, `prompt`, `mcpTool` and `agent`. That
+is why the beacon keeps a `curl` dependency; see
+[architecture.md](architecture.md#native-http-hooks-were-evaluated-and-not-adopted).
+The fields the beacon uses:
 
 | Field | Use |
 |-------|-----|

@@ -69,5 +69,11 @@ with print settings and the full bill of materials in [enclosure.md](enclosure.m
 ## Open questions
 
 - Does the statusline payload carry context percent directly, or only token counts that need a per-model denominator? Decide in Phase 1 step 1.
+- ~~Should the lifecycle hooks move to Claude Code's native `http` hook type and
+  drop `curl`?~~ **Answered: no.** `statusLine` is command-only, so `curl` stays on
+  the busiest path either way, and the events it would save cost under a second an
+  hour in total. See
+  [architecture.md](architecture.md#native-http-hooks-were-evaluated-and-not-adopted)
+  for the evidence and for what would change the answer.
 - Do hooks on Windows run through cmd, PowerShell, or Git Bash? Affects the `command` string quoting. Test in Phase 1 step 4.
 - Should `IDLE` after a `Stop` count as "needs you"? Arguably yes after some minutes: Claude finished and you have not looked. Start with a configurable `idle_nag_s` (default off) and see what feels right.

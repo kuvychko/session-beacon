@@ -30,13 +30,69 @@ curl ships with Windows, so this also removes any dependence on which Python is 
 
 `hooks/beacon_hook.py` remains as a portable fallback for machines without curl, and `hooks/capture_payloads.py` exists to record real payloads for fixtures.
 
+### Native HTTP hooks were evaluated and not adopted
+
+Claude Code has a native `http` hook type that would POST the payload to the
+daemon with no process at all. It was checked against both the published
+[hooks reference](https://code.claude.com/docs/en/hooks) and the CLI binary on
+this machine (2.1.261), because in this project the binary has already been
+right where the docs were wrong. The feature is real: `HttpHookSchema` takes
+`url`, `timeout` in seconds, `headers` and `allowedEnvVars`, and a localhost
+target is explicitly blessed rather than tolerated — the binary carries the
+string "Loopback (127.0.0.1, ::1) is allowed for local dev". It was still not
+adopted, for four reasons.
+
+**The status line cannot follow.** `statusLine` accepts `"type": "command"` and
+nothing else, so `curl.exe` stays on a path that runs on every status refresh
+whatever the events do. Moving the nine lifecycle events to `http` halves the
+process spawns at best; it does not remove the dependency, which was the point.
+
+**The saving is below the noise floor.** `/health` reported 56 hook events in
+60 minutes of ordinary use. Against the 15.6 ms median above, that is under a
+second of added latency per hour, arriving as 56 separate 15 ms moments. The
+8x margin over a Python forwarder in the table is real, but it is 8x of a
+number small enough that the table exists to justify a choice already made,
+not to chase further.
+
+**Cross-platform config gains little.** The only Windows-specific token in the
+hook commands is the absolute path `C:/Windows/System32/curl.exe`; elsewhere it
+is just `curl`. The `statusLine` line needs that same edit for a Linux host
+regardless, so an `http` block does not shrink the port.
+
+**It would add a silent failure.** An unrecognised hook `type` is answered with
+`Unknown hook type "..."` and the hook is skipped. On a Claude Code older than
+the one that added `http`, every event would vanish and the display would go
+blank — which is the symptom this project already warns is mistaken for a
+hardware fault.
+
+Two further details are worth recording so they do not have to be dug out of
+the binary again. `async`, "hook runs in background without blocking", is a
+field on the **command** hook schema only, not the HTTP one; an `http` hook
+still blocks the turn, so it would not have bought non-blocking delivery
+either. And an HTTP hook's response must be empty or JSON — "HTTP hook returned
+empty body, treating as empty JSON object" — where a command hook's stdout is
+free-form. The `timeout` would also have to be set explicitly: the documented
+default for `http` hooks is 600 seconds, against `--max-time 1` today, so a
+wedged daemon could stall a session instead of failing instantly.
+
+What would change the answer:
+
+- `statusLine` gaining a non-command type. That is the single change that would
+  actually take `curl` out of the design, and it makes the rest of the argument
+  collapse.
+- A Linux or macOS host, where the whole configuration could then be one
+  OS-independent block — but only if the status line comes along too.
+- Spawn cost becoming visible under many concurrent sessions. This would
+  announce itself rather than needing to be hunted: Claude Code warns with
+  `Slow PostToolUse hooks:` and `--debug` prints a per-hook `durationMs`.
+
 ### The daemon composes the status line
 
 The statusline hook is also plain curl. It POSTs the payload to `/status` and the daemon returns the text to display in the response body, which curl prints. That keeps a second interpreter out of a path that runs on every status refresh.
 
 The reply is composed purely from the payload just received, so the HTTP handler needs no shared state and no locking. The one external fact it uses is whether the device is currently connected, which appears as a `beacon` or `beacon?` marker at the end of the line. That makes a dead daemon or an unplugged display visible in the terminal without looking at the device.
 
-`/event` replies `204` with an empty body, deliberately. Claude Code feeds some hooks' stdout back into the session as context, so the forwarder must print nothing.
+`/event` replies `204` with an empty body, deliberately. Claude Code feeds some hooks' stdout back into the session as context, so the forwarder must print nothing. That answer happens to satisfy the HTTP hook contract as well, where a response body must be empty or JSON, so the constraint now has two independent reasons behind it.
 
 ## Session state machine
 
