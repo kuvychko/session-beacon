@@ -50,25 +50,30 @@ def _marker(v: Any) -> str:
     return f"<{type(v).__name__}>"
 
 
-def _redact_tasks(v: Any) -> Any:
-    """Keep the shape of `background_tasks`, drop the free text.
+# Free text that appears *inside* a structured field rather than at the top
+# level. `description` names a background task; `ruleContent` is the permission
+# rule Claude Code offers to add, which is built from the command line and so
+# echoes the very thing redacting `tool_input` is meant to strip.
+NESTED_CONTENT_KEYS = frozenset({"description", "ruleContent"})
 
-    The state machine reads `status` to tell a running task from a finished one,
-    and `type`/`agent_type` say what it is. `description` is model- or
-    user-authored prose that can say anything, so it is marked like any other
-    content field. Nothing else in a payload nests this way, which is why redact
-    is otherwise flat.
+# Top-level fields holding structured data with free text somewhere inside.
+# Their shape is worth keeping: `status` tells a running background task from a
+# finished one, and `behavior`/`toolName` say what a suggestion would allow.
+STRUCTURED_FIELDS = frozenset({"background_tasks", "permission_suggestions"})
+
+
+def _redact_nested(v: Any) -> Any:
+    """Walk a structured field, marking free text and keeping everything else.
+
+    Recursive because the nesting is not one level: a permission suggestion
+    holds a list of rules, and the free text is inside those.
     """
-    if not isinstance(v, list):
-        return _marker(v)
-    out = []
-    for task in v:
-        if not isinstance(task, dict):
-            out.append(_marker(task))
-            continue
-        out.append({k: (_marker(vv) if k == "description" else vv)
-                    for k, vv in task.items()})
-    return out
+    if isinstance(v, dict):
+        return {k: (_marker(vv) if k in NESTED_CONTENT_KEYS else _redact_nested(vv))
+                for k, vv in v.items()}
+    if isinstance(v, list):
+        return [_redact_nested(item) for item in v]
+    return v
 
 
 def redact(payload: dict[str, Any]) -> dict[str, Any]:
@@ -83,8 +88,8 @@ def redact(payload: dict[str, Any]) -> dict[str, Any]:
     for k, v in payload.items():
         if k in CONTENT_FIELDS:
             out[k] = _marker(v)
-        elif k == "background_tasks":
-            out[k] = _redact_tasks(v)
+        elif k in STRUCTURED_FIELDS:
+            out[k] = _redact_nested(v)
         elif k == "tool_input" and isinstance(v, dict):
             # Argument names are useful; argument values are the user's data.
             out[k] = {kk: _marker(vv) for kk, vv in v.items()}

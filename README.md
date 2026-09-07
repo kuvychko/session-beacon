@@ -134,18 +134,18 @@ timers, the daemon and its state machine, hook delivery from live sessions,
 session labelling, hardware SPI at 24 MHz, session state surviving a daemon
 restart, and the attention state from a captured `idle_prompt`.
 
-**The attention path is now evidence rather than reasoning.** It was the one
-part of the display resting on inference: the events that drive a red row had
-never been seen firing. A `Notification` carrying `notification_type:
-"idle_prompt"` has since been captured and is committed as a fixture, and it
-arrived *twice* for the same unanswered session, which is why the alarm arms
-only when a session first starts waiting.
+**The attention path is evidence, not reasoning.** It was the one part of the
+display resting on inference: the events that turn a row red had never been seen
+firing. Both are now captured and committed as fixtures — a `Notification`
+carrying `notification_type: "idle_prompt"`, and the dedicated
+`PermissionRequest` — so the red row is covered by replayed payloads rather than
+hand-written ones. The `idle_prompt` arrived *twice* for the same unanswered
+session, which is why the alarm arms only when a session first starts waiting.
 
-**One gap left.** `PermissionRequest` still has not been observed. It needs an
-interactive permission prompt, which a scripted run cannot produce, and sessions
-here mostly run in a mode that never raises one. The state machine handles it
-and the notification path that covers the same ground is now confirmed, so the
-risk is small, but it is inference.
+**One surprise.** Refusing a permission prompt did not produce a
+`PermissionDenied`, though the hook was registered and the matching
+`PermissionRequest` arrived. Seen once, so it is a data point rather than a rule.
+Nothing depends on it: the row corrects itself on the next tool call.
 
 The enclosure is printed and fitted, so it is a finished object rather than a
 breadboard. Remaining work is comfort rather than function: see

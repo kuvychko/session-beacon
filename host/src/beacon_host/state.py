@@ -139,6 +139,12 @@ class SessionStore:
             self._want_attention(s, now)
         elif name == "PermissionDenied":
             # The prompt was answered, just not with a yes.
+            #
+            # Dead on Claude Code 2.1.261: refusing a prompt produced the
+            # PermissionRequest and no PermissionDenied, with the hook
+            # registered. Kept because it is right if the event ever arrives,
+            # and harmless if it does not -- the next tool call clears the row
+            # either way.
             s.set_state(State.WORKING, now)
         elif name == "Notification":
             kind = ev.get("notification_type")

@@ -40,7 +40,18 @@ Two of these are more useful than they first look:
 | `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
 | `SessionEnd` | Session closes | `ENDED` |
 
-**`PermissionRequest` is a dedicated event.** An earlier draft of this design watched `Notification` for `permission_prompt` instead. The dedicated event is more precise and arrives without depending on notification settings, so it is now the primary signal, with the notification kept as a second path.
+**`PermissionRequest` is a dedicated event.** An earlier draft of this design watched `Notification` for `permission_prompt` instead. The dedicated event is more precise and arrives without depending on notification settings, so it is now the primary signal, with the notification kept as a second path. Both are now captured, so neither is inference.
+
+It carries `tool_name`, a redacted `tool_input`, and `permission_suggestions`: the rule Claude Code offers to add if you choose "allow always".
+
+```json
+"permission_suggestions": [{"behavior": "allow", "destination": "localSettings",
+  "rules": [{"ruleContent": "...", "toolName": "Bash"}], "type": "addRules"}]
+```
+
+`ruleContent` is built from the command line, so it echoes the text that
+redacting `tool_input` exists to strip. Capture marks it, along with a
+background task's `description`; see below.
 
 **`PreToolUse` is deliberately not registered.** `PostToolUse` alone is enough for activity and staleness, and skipping `PreToolUse` halves the hook cost on the busiest event. Turn it on only if a hint of what a session is *about* to do turns out to be worth the latency. The state machine handles it either way.
 
@@ -192,18 +203,27 @@ Three different levels, and the difference matters.
 
 **Observed on this machine**, captured by running the daemon with `--capture` against
 Claude Code 2.1.261 and saved to `host/tests/fixtures/hook_payloads.jsonl`:
-`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`
-(`notification_type: "idle_prompt"`, carrying a `message`), `Stop`, `SessionEnd`.
+`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`,
+`Notification` (`notification_type: "idle_prompt"`, carrying a `message`),
+`Stop`, `SessionEnd`.
 
 **Also observed**: a `Stop` carrying a populated `background_tasks`, captured by
 ending a turn with a subagent still running and saved to
 `host/tests/fixtures/stop_with_background_tasks.json`. The empty list had been
 seen long before, which showed the field existed but not the shape of an entry.
 
-**Present in the CLI binary but not yet seen firing**: `PermissionRequest`,
-`PermissionDenied`, `StopFailure`, `PostToolUseFailure`, `SubagentStop`, and the
-`notification_type` values `permission_prompt` and `agent_needs_input`. Triggering
-them needs an interactive permission prompt, which a headless run cannot produce.
+**Present in the CLI binary but not yet seen firing**: `StopFailure`,
+`PostToolUseFailure`, `SubagentStop`, and the `notification_type` values
+`permission_prompt` and `agent_needs_input`.
+
+**Registered, triggered, and did not fire**: `PermissionDenied`. Denying a Bash
+command at the interactive prompt produced a `PermissionRequest` and nothing
+else, with `PermissionDenied` present in `~/.claude/settings.json` at the time.
+Observed once, so it is a data point rather than a rule — it may fire only for a
+programmatic denial, such as a hook returning deny, rather than a person
+answering no. The state machine's `PermissionDenied` branch is therefore dead
+code on this build. It is kept because it is correct if the event ever arrives,
+and because the row corrects itself on the next tool call regardless.
 
 `idle_prompt` has left this list. It was the load-bearing one, because it is the
 path by which an ordinary session that finished its turn ends up asking for
@@ -246,11 +266,18 @@ uv run beacon-host --capture "$env:TEMP/beacon-payloads.jsonl"
 Conversation content is stripped as it is written. Prompts, tool arguments, tool
 responses and assistant messages become markers like `<str len=22>`, and every path
 except `cwd` is reduced to its last segment because the others carry a username.
+
+Two fields hide free text *inside* a structure rather than at the top level, and
+both are walked recursively: `permission_suggestions`, whose `ruleContent` is
+derived from the command line, and `background_tasks`, whose `description` names
+a running agent. Their shape survives — a task's `status`, a suggestion's
+`behavior` and `toolName` — because that is what the state machine and the tests
+read.
 Field names and shapes survive, which is all a fixture needs. A test asserts the
 committed fixtures contain no usernames or unredacted text.
 
 ## Still to confirm
 
-1. ~~Confirm how attention arrives.~~ **Partly done.** A `Notification` carrying `notification_type: "idle_prompt"` is captured and committed. Whether a permission prompt *also* raises a dedicated `PermissionRequest` is still unobserved; the state machine handles both paths.
+1. ~~Confirm how attention arrives.~~ **Done.** Both paths are captured and committed: a `Notification` carrying `notification_type: "idle_prompt"`, and a dedicated `PermissionRequest`. What a permission prompt does *not* produce, at least once, is a `PermissionDenied` on being refused; see above.
 2. ~~Capture a statusline payload.~~ **Done.** Captured and confirmed: `used_percentage` 54 against a `context_window_size` of 1000000, `model.display_name` `Opus 5`, and `rate_limits` present. What is still unobserved is the null case: `used_percentage` is documented as null early in a session and after a `/compact`, and the input-token fallback that covers it has only ever been exercised by unit tests.
 3. Watch a `StopFailure` land, most easily during a rate limit.

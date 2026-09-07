@@ -38,8 +38,8 @@ def events() -> dict[str, dict]:
 
 def test_fixtures_cover_the_observed_lifecycle(events):
     assert set(events) == {
-        "SessionStart", "UserPromptSubmit", "PostToolUse", "Notification",
-        "Stop", "SessionEnd"
+        "SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse",
+        "Notification", "Stop", "SessionEnd"
     }
 
 
@@ -208,3 +208,34 @@ def test_a_repeated_real_idle_prompt_does_not_restart_the_pulse(events):
     store.tick(220)
     assert store.sessions[sid].state == State.NEEDS_HELD
     assert store.snapshot(220)["s"][0]["age"] == 220
+
+
+def test_the_real_permission_request_drives_the_attention_state(events):
+    """The dedicated attention event, from a captured payload.
+
+    Triggered by switching the session to manual approval and running a command
+    that needs one, with the daemon capturing.
+    """
+    p = events["PermissionRequest"]
+    assert p["tool_name"] == "Bash"
+    assert p["permission_mode"] == "default"
+
+    store = SessionStore()
+    store.apply_event(events["UserPromptSubmit"], 0)
+    sid = events["UserPromptSubmit"]["session_id"]
+    store.apply_event({**p, "session_id": sid}, 1)
+    assert store.sessions[sid].state == State.NEEDS_INPUT
+
+    # Answering it, by letting the tool run, clears the row.
+    store.apply_event({**events["PostToolUse"], "session_id": sid}, 2)
+    assert store.sessions[sid].state == State.WORKING
+
+
+def test_permission_suggestions_carry_no_command_text(events):
+    """`permission_suggestions` holds the rule Claude Code offers to add, and
+    the rule is built from the command line -- the very thing redacting
+    `tool_input` exists to strip. The shape survives; the text does not."""
+    sug = events["PermissionRequest"]["permission_suggestions"][0]
+    assert sug["behavior"] == "allow"
+    assert sug["rules"][0]["toolName"] == "Bash"
+    assert sug["rules"][0]["ruleContent"].startswith("<")

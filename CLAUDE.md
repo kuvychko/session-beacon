@@ -37,7 +37,7 @@ docs/                        architecture, hardware, enclosure, protocol, claude
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
 - `host/tests/fixtures/` holds **real** captured payloads, not hand-written ones: `hook_payloads.jsonl` for the lifecycle, one per event, and `stop_with_background_tasks.json` for the populated `background_tasks` a plain `Stop` never shows. Refresh it with `beacon-host --capture FILE`. The published hook schema disagrees with what this build actually sends, so prefer a capture over the docs when the two conflict.
-- Capture redacts conversation content and every path but `cwd`. Never commit a payload that has not been through `capture.redact`; a test guards this.
+- Capture redacts conversation content and every path but `cwd`, including free text nested inside `permission_suggestions` and `background_tasks`. Never commit a payload that has not been through `capture.redact`; a test guards every file in `host/tests/fixtures/`.
 - Session labels are the enclosing git repository's name, not the `cwd` basename. `cwd`
   moves as a session works and labelling from it directly mislabels any session that
   runs in a subdirectory. Overrides go in `host/config.local.toml` or `host/config.toml`,
