@@ -124,6 +124,8 @@ stateDiagram-v2
     WORKING --> IDLE: Stop (no background tasks)
     WORKING --> WORKING: Stop (background tasks running)
     WORKING --> ERROR: StopFailure
+    WORKING --> STALE: no event for stale_after_s
+    STALE --> WORKING: PostToolUse / UserPromptSubmit
     ERROR --> WORKING: UserPromptSubmit
     IDLE --> NEEDS_INPUT: Notification(idle_prompt)
     STARTING --> ENDED: SessionEnd
@@ -132,6 +134,8 @@ stateDiagram-v2
     NEEDS_INPUT --> ENDED: SessionEnd
     NEEDS_HELD --> ENDED: SessionEnd
     WAITING --> ENDED: SessionEnd
+    ERROR --> ENDED: SessionEnd
+    STALE --> ENDED: SessionEnd
     ENDED --> [*]: after grace period
 ```
 
@@ -217,6 +221,7 @@ beacon_host/
   statusline.py    Composes the text returned to the statusline hook
   serial_link.py   Opens the COM port, writes snapshots, reconnects on loss
   persist.py       Saves and restores the session store across daemon restarts
+  capture.py       Redacts and appends hook payloads to JSONL, for fixtures
   config.py        TOML config: port, label overrides, thresholds, logging
 ```
 
@@ -238,13 +243,13 @@ Nothing tells the daemon that a window was closed while it was down, because `Se
 
 Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
 
-Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s` and `rows`, which is what is currently on the display. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. A tray icon is a possible later addition, not phase 1.
+Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s`, `uptime_s` and `rows`, which is what is currently on the display. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. A tray icon is a possible later addition, not phase 1.
 
 ## Firmware internals
 
 - Single sketch, Arduino IDE, same libraries as `env_monitoring` (Adafruit_GFX, Adafruit_ST7735) plus ArduinoJson.
-- `Serial` (USB CDC) at 115200. Reads until newline, parses with a fixed-size ArduinoJson document (2 KB is plenty for 6 sessions).
-- Repaints only changed *fields*, tracking what the header, each row, and the footer currently show. Measured on this panel over software SPI, a full-screen repaint costs about 900 ms, a full two-row repaint about 100 ms, and a field-level update of one row about 28 ms. Since the host resends a snapshot every second purely to advance timers, repainting everything would leave the device permanently mid-sweep, so this is not a premature optimisation. Hardware SPI would cut both figures by roughly an order of magnitude and needs no rewiring, but the partial-update path is already fast enough that it has not been worth the risk of changing.
+- `Serial` (USB CDC) at 115200. Reads until newline, parses with an ArduinoJson 7 `JsonDocument`, which sizes itself on the heap; the old fixed-capacity `StaticJsonDocument` is gone from that library. A line longer than the 1024-byte buffer is discarded whole, remainder included, and counted in the heartbeat's `drop`.
+- Repaints only changed *fields*, tracking what the header, each row, and the footer currently show. Measured on this panel over software SPI, a full-screen repaint cost about 900 ms, a full two-row repaint about 100 ms, and a field-level update of one row about 28 ms. Since the host resends a snapshot every second purely to advance timers, repainting everything would have left the device permanently mid-sweep, so this is not a premature optimisation. The sketch has since moved to hardware SPI at 24 MHz, which cut those figures by roughly an order of magnitude and needed no rewiring; the partial-update path is kept because the reasoning holds at any speed, and `USE_HARDWARE_SPI 0` reverts to bit-banging the same pins.
 - **Nothing is cleared to background before being drawn.** Every varying field is a
   fixed width at a fixed x, drawn with an opaque text background so each glyph erases
   the cell it replaces. Right-aligned values are space-padded into their field rather

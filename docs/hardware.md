@@ -49,12 +49,18 @@ Order the display's header as printed on its own silkscreen. On this module it r
 #define TFT_DC    D8
 #define TFT_MOSI  D11
 #define TFT_SCLK  D13
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+static constexpr uint32_t SPI_HZ = 24000000;
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);   // hardware SPI
 
+tft.setSPISpeed(SPI_HZ);     // 24 MHz
 tft.initR(INITR_GREENTAB);   // required for the ST7735S variant
 tft.setRotation(1);          // landscape, 160 wide x 128 high
 applyPanelColorOrder();      // this panel is BGR-wired, see below
 ```
+
+`TFT_MOSI` and `TFT_SCLK` are still defined because the bit-banging revert needs
+them, but the 3-argument constructor above does not take them: naming them is
+the library's signal to bit-bang. See below.
 
 `INITR_GREENTAB` is not a guess to tune. `env_monitoring` established that this panel is an ST7735**S**, and the ST7735 (`BLACKTAB`) and ST7735R (`REDTAB`) gamma and offset tables produce shifted images or wrong colours on it. Bench testing confirmed the offsets and rotation are correct with `GREENTAB`.
 
