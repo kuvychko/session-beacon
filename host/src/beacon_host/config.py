@@ -14,6 +14,8 @@ class Config:
     port: str | None = None           # COM port; None means auto-detect by VID/PID
     http_port: int = DEFAULT_HTTP_PORT
     stale_after_s: float = 300.0
+    need_pulse_s: float = 120.0       # how long an attention row pulses
+    need_red_s: float = 600.0         # how long it stays red at all
     ended_grace_s: float = 30.0
     max_rows: int = 6
     log_file: str | None = None       # None means stderr only
@@ -34,8 +36,9 @@ class Config:
         with p.open("rb") as f:
             raw = tomllib.load(f)
 
-        for key in ("port", "http_port", "stale_after_s", "ended_grace_s",
-                    "max_rows", "log_file", "log_level"):
+        for key in ("port", "http_port", "stale_after_s", "need_pulse_s",
+                    "need_red_s", "ended_grace_s", "max_rows", "log_file",
+                    "log_level"):
             if key in raw:
                 setattr(cfg, key, raw[key])
         # Label keys are paths; normalise separators so either form works.

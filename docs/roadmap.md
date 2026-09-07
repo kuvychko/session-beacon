@@ -20,7 +20,7 @@ Goal: the screen shows real session states from real Claude Code sessions.
 5. ~~Hook forwarder and settings.~~ **Done.** Forwarding is `curl`, installed by `scripts/install-hooks.ps1`. Remaining: watch it with several real sessions running and confirm the exit criteria below.
 6. ~~Stabilise on hardware.~~ **Done.** Fixed an unsigned-underflow timing bug that made the device alternate with "no host", and added receive counters to the heartbeat so host-side and device-side silence can be told apart.
 
-Exit criteria: leaving a session on a permission prompt turns its row red within one second; answering it turns it blue; `Stop` turns it green.
+Exit criteria: leaving a session on a permission prompt turns its row red within one second; answering it turns it blue; `Stop` turns it green. Leaving it unanswered stops the pulse after two minutes and the red after ten.
 
 ## Phase 2: Make it a daily driver
 
@@ -30,11 +30,21 @@ Done:
 - ~~Run at login (Task Scheduler, `pythonw`), log to a rotating file.~~ The script
   exists as `scripts/install-task.ps1`; installing it is a per-machine step.
 - ~~Cost and context percent in the footer from the statusline payload.~~
-- ~~Blink and stale handling polished.~~
+- ~~Blink and stale handling polished.~~ The alarm now decays: it pulses for two
+  minutes, holds a static red for eight more, then settles to an amber dot and
+  sorts below the working sessions. A permanent blink had two sessions lit for
+  thirteen hours. See [the attention ladder](architecture.md#the-attention-ladder).
 - ~~Label overrides in config.~~ Keyed by repo root or exact directory.
 
 Still open:
 
+- **A false red while a turn waits on background work.** A turn that ends with
+  background agents still running fires `Stop`, so the session reads as idle and
+  the next `idle_prompt` escalates it to red with nothing for anyone to do. The
+  `Stop` payload carries `background_tasks`, which is the discriminator; the only
+  captured `Stop` has it empty, so the fix waits on a capture of the non-empty
+  shape rather than a guess. The ladder caps the damage at two minutes of pulsing
+  in the meantime.
 - **Last tool name per row.** The host already records it and the protocol carries a
   `tool` field; nothing draws it. There is no room on a row without giving up label
   width, so it needs a layout decision rather than plumbing.

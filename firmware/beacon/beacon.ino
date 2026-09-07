@@ -126,9 +126,16 @@ static constexpr int16_t BAR_W    = 44;
 #define C_WORK    0x04FF   // blue
 #define C_NEED    ST77XX_RED
 #define C_IDLE    ST77XX_GREEN
-#define C_STALE   0xFD20   // amber
+#define C_STALE   0xFD20   // amber, and see C_WAIT
 #define C_ERR     0xF81F   // magenta
 #define C_END     0x4208   // dim grey
+// Deliberately the same amber as stale, not an oversight. "Busy but gone quiet"
+// and "waiting on you for a while" ask a person for the same thing -- look at
+// this one when you get a chance -- and in both the age is the informative
+// part. They stay separate on the wire so the host, /health and the sort can
+// tell them apart; only the pixels converge. Do not split this into a colour of
+// its own without a reason the display itself can show.
+#define C_WAIT    C_STALE
 
 // ---- Snapshot model ----
 struct Session {
@@ -212,6 +219,8 @@ uint32_t rxDropped = 0;  // lines abandoned for exceeding the buffer
 static uint16_t stateColor(const char* st) {
   if (!strcmp(st, "work"))  return C_WORK;
   if (!strcmp(st, "need"))  return C_NEED;
+  if (!strcmp(st, "held"))  return C_NEED;
+  if (!strcmp(st, "wait"))  return C_WAIT;
   if (!strcmp(st, "idle"))  return C_IDLE;
   if (!strcmp(st, "stale")) return C_STALE;
   if (!strcmp(st, "err"))   return C_ERR;
@@ -219,7 +228,18 @@ static uint16_t stateColor(const char* st) {
   return C_START;
 }
 
-static bool isNeed(const char* st) { return !strcmp(st, "need"); }
+// The two loud rungs of the attention ladder fill their row; only the first
+// one moves. A `held` row is drawn once and then costs nothing per frame.
+static bool isFilled(const char* st) {
+  return !strcmp(st, "need") || !strcmp(st, "held");
+}
+static bool isPulsing(const char* st) { return !strcmp(st, "need"); }
+
+// Amber age: a session that went quiet while busy, and one that has been
+// waiting on a human long enough to stop shouting, read the same way.
+static bool isAmberAge(const char* st) {
+  return !strcmp(st, "stale") || !strcmp(st, "wait");
+}
 
 // Every timer comparison goes through this. A signed difference is safe
 // across the 49-day millis() rollover, and safe when a stored timestamp is
@@ -346,12 +366,19 @@ static void drawHeader() {
 // red-on-black and black-on-red. Both phases stay readable, so it reads as a
 // pulse rather than as text flashing in and out.
 //
+// It only pulses for the first couple of minutes. After that the host sends
+// `held` and the row keeps the filled red but stops moving, and later `wait`,
+// which is an ordinary row with an amber dot. The shout decays on its own,
+// because a session left waiting on purpose is the normal case and a permanent
+// blink is noise. The rungs and their timing are host policy; the firmware only
+// knows how each one looks.
+//
 // Everything else redraws only the fields that changed, in place, over an
 // opaque background. The row is cleared only when its background colour
 // actually changes, which for a steady session is never.
 static void drawRow(uint8_t i) {
   const Session& s = snap.s[i];
-  const bool need = isNeed(s.state);
+  const bool filled = isFilled(s.state);
   // The footer's context page describes one session, and without a mark on the
   // row it belongs to, a reader has no way to tell which. It stays put rather
   // than appearing only while that page is up: a marker blinking every four
@@ -359,10 +386,13 @@ static void drawRow(uint8_t i) {
   const bool featured = (snap.sel >= 0 && i == (uint8_t)snap.sel);
 
   uint16_t bg = C_BG, labelFg = C_TEXT, ageFg = C_MUTED, dot = stateColor(s.state);
-  if (need) {
-    if (blinkOn) { bg = C_NEED; labelFg = ageFg = dot = ST77XX_BLACK; }
-    else         { bg = C_BG;   labelFg = ageFg = dot = C_NEED; }
-  } else if (!strcmp(s.state, "stale")) {
+  if (filled) {
+    // `held` sits permanently in the phase `need` spends half its time in, so
+    // the two rungs share a treatment and only one of them animates.
+    const bool on = isPulsing(s.state) ? blinkOn : true;
+    if (on) { bg = C_NEED; labelFg = ageFg = dot = ST77XX_BLACK; }
+    else    { bg = C_BG;   labelFg = ageFg = dot = C_NEED; }
+  } else if (isAmberAge(s.state)) {
     ageFg = C_STALE;
   } else if (!strcmp(s.state, "err")) {
     ageFg = C_ERR;
@@ -611,24 +641,31 @@ static bool parseMessage(const char* line) {
 // ---- Demo mode ----
 //
 // Lets the layout be judged on real hardware before any host software exists.
+//
+// Six rows for nine states, so this shows the six that carry colour policy. The
+// three rungs of the attention ladder lead, and `wait` is put next to `stale`
+// on purpose: they are meant to be indistinguishable, and the only way to check
+// that is to see them side by side. `idle`, `start` and `end` are unchanged and
+// easy enough to see on a live display.
 static void demoLoad() {
   Snapshot d;
   d.valid = true;
-  d.n = 5;
-  d.count = 5;
+  d.n = 6;
+  d.count = 6;
   d.sel = 0;   // the attention row, which the footer describes
   d.cost = 4.20f;
   d.rlH5 = 92;
   d.rlD7 = 28;
 
   struct { const char* l; const char* st; uint32_t age; int8_t ctx; const char* m; } rows[] = {
-    {"env_monitoring", "need",  844, 41, "opus5"},
+    {"env_monitoring", "need",   44, 41, "opus5"},
+    {"data-pipeline",  "held",  305, -1, ""},
     {"session-beacon", "work",  126, 62, "fable5.1"},
-    {"data-pipeline", "err",   362, -1, ""},
-    {"web-frontend","stale", 900, -1, ""},
-    {"homelab",        "idle",    7, 18, "sonnet5"},
+    {"nanovolt-divide","wait", 2760, -1, ""},
+    {"web-frontend",   "stale", 900, -1, ""},
+    {"homelab",        "err",   362, 18, "sonnet5"},
   };
-  for (uint8_t i = 0; i < 5; i++) {
+  for (uint8_t i = 0; i < 6; i++) {
     copyStr(d.s[i].id, sizeof d.s[i].id, "demo");
     copyStr(d.s[i].label, sizeof d.s[i].label, rows[i].l);
     copyStr(d.s[i].state, sizeof d.s[i].state, rows[i].st);
@@ -698,7 +735,7 @@ void loop() {
     blinkOn = !blinkOn;
     if (snap.valid && !showingNoHost) {
       for (uint8_t i = 0; i < snap.count; i++)
-        if (isNeed(snap.s[i].state)) drawRow(i);
+        if (isPulsing(snap.s[i].state)) drawRow(i);
     }
   }
 

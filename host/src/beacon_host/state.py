@@ -17,21 +17,37 @@ class State(StrEnum):
     STARTING = "start"
     WORKING = "work"
     NEEDS_INPUT = "need"
+    NEEDS_HELD = "held"
+    WAITING = "wait"
     ERROR = "err"
     IDLE = "idle"
     STALE = "stale"
     ENDED = "end"
 
 
+# The three rungs a session waiting on a human descends through, loudest first.
+# Entering the family starts the ladder; re-entering it while already inside
+# does not, or a prompt that re-notifies would pulse forever.
+ATTENTION_STATES = (State.NEEDS_INPUT, State.NEEDS_HELD, State.WAITING)
+
+
 # Display priority: lower sorts first.
+#
+# WAITING sits *below* WORKING, next to STALE, even though it still wants a
+# human. It renders identically to STALE and it is the state sessions left idle
+# on purpose settle into, so ranking it with the alarm states would park them in
+# the top rows permanently and push actively working sessions off a six-row
+# display. That is the noise the ladder exists to remove, not to relocate.
 PRIORITY = {
     State.NEEDS_INPUT: 0,
-    State.ERROR: 1,
-    State.WORKING: 2,
-    State.STALE: 3,
-    State.STARTING: 4,
-    State.IDLE: 5,
-    State.ENDED: 6,
+    State.NEEDS_HELD: 1,
+    State.ERROR: 2,
+    State.WORKING: 3,
+    State.WAITING: 4,
+    State.STALE: 5,
+    State.STARTING: 6,
+    State.IDLE: 7,
+    State.ENDED: 8,
 }
 
 # Notification types that mean a human has to do something. Taken from the
@@ -70,6 +86,11 @@ class Session:
 @dataclass
 class SessionStore:
     stale_after_s: float = 300.0
+    # How long a session that wants a human pulses, and how long it stays red at
+    # all. Both are measured from when it entered the attention family, so they
+    # are absolute positions on the ladder rather than durations of each rung.
+    need_pulse_s: float = 120.0
+    need_red_s: float = 600.0
     ended_grace_s: float = 30.0
     max_rows: int = 6
     label_overrides: dict[str, str] = field(default_factory=dict)
@@ -113,13 +134,13 @@ class SessionStore:
             s.set_state(State.WORKING, now)
         elif name == "PermissionRequest":
             # A dedicated event, more precise than watching Notification.
-            s.set_state(State.NEEDS_INPUT, now)
+            self._want_attention(s, now)
         elif name == "PermissionDenied":
             # The prompt was answered, just not with a yes.
             s.set_state(State.WORKING, now)
         elif name == "Notification":
             if ev.get("notification_type") in ATTENTION_NOTIFICATIONS:
-                s.set_state(State.NEEDS_INPUT, now)
+                self._want_attention(s, now)
             else:
                 s.last_event = now
         elif name == "Stop":
@@ -134,6 +155,22 @@ class SessionStore:
             s.set_state(State.ENDED, now)
         else:
             s.last_event = now
+
+    @staticmethod
+    def _want_attention(s: Session, now: float) -> None:
+        """Put a session on the attention ladder, or leave it where it is.
+
+        Re-entry must not restart the pulse. `idle_prompt` fires whenever Claude
+        has been waiting a while, so a session nobody answers is notified again
+        and again; resetting the rung on each one would pulse forever, which is
+        the whole thing the ladder exists to stop. The ladder re-arms only after
+        the session has genuinely left the family, via a tool call, a prompt or
+        a Stop.
+        """
+        if s.state in ATTENTION_STATES:
+            s.last_event = now
+            return
+        s.set_state(State.NEEDS_INPUT, now)
 
     def apply_status(self, st: dict[str, Any], now: float) -> None:
         """Apply one statusline payload. Field names to be confirmed in Phase 1."""
@@ -151,13 +188,30 @@ class SessionStore:
             self.rate_limits, self.rate_limits_at = rl, now
 
     def tick(self, now: float) -> None:
-        """Advance time: mark stale sessions, drop ended ones."""
+        """Advance time: walk the attention ladder, mark stale, drop ended."""
         for sid in list(self.sessions):
             s = self.sessions[sid]
             if s.state == State.ENDED and now - s.state_since > self.ended_grace_s:
                 del self.sessions[sid]
             elif s.state == State.WORKING and now - s.last_event > self.stale_after_s:
                 s.set_state(State.STALE, now)
+            # The ladder assigns `state` directly instead of calling set_state(),
+            # which is the opposite of the STALE transition above and looks like
+            # a bug until you see why: set_state() resets state_since, and that
+            # is both the displayed age and the ladder's own origin. Resetting
+            # it would restart the age mid-wait and re-base the second
+            # threshold, so `wait` would arrive ten minutes after `held` rather
+            # than ten minutes after the session began waiting.
+            elif s.state in (State.NEEDS_INPUT, State.NEEDS_HELD):
+                # Both rungs share an origin and the larger threshold is
+                # tested first, so the ladder settles in a single tick however
+                # long it has been since the last one. Advancing one rung per
+                # tick would leave a resumed laptop pulsing until the next pass.
+                waited = now - s.state_since
+                if waited > self.need_red_s:
+                    s.state = State.WAITING
+                elif waited > self.need_pulse_s:
+                    s.state = State.NEEDS_HELD
 
     # ---- output ----
 

@@ -75,7 +75,7 @@ flowchart LR
 ```
 
 1. **Claude Code hooks** fire on session lifecycle events. Each one is a single `curl` call to the daemon, which measured about eight times cheaper than starting a Python interpreter per event.
-2. **beacon-host** keeps a per-session state machine (starting / working / needs input / error / idle / stale / ended), enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
+2. **beacon-host** keeps a per-session state machine (starting / working / needs input / error / idle / stale / ended), decides how loudly each one should be shown, enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
 3. **Firmware** is deliberately dumb: it parses the snapshot and draws it. All policy lives on the host so it can change without reflashing.
 
 On the screen, one row per session:
@@ -84,9 +84,9 @@ On the screen, one row per session:
 +----------------------------------------+
 | BEACON      4 active         $61.17    |
 |----------------------------------------|
-|############ env_monitoring     14m ####|  wants you now: filled red, pulsing
+|############ env_monitoring     44s ####|  wants you now: filled red, pulsing
+|############ data-pipeline       5m ####|  still waiting: filled red, static
 | o session-beacon                 2m    |  blue: working
-| o data-pipeline                  6m    |  magenta: stopped on an API error
 | o web-frontend                  15m    |  amber: busy but gone quiet
 | o homelab                        7s    |  green: finished its turn
 |                                        |
@@ -103,6 +103,12 @@ and your account's rolling five-hour and seven-day usage.
 State is carried by colour rather than a word, and the elapsed time is how long a
 session has been in that state. The one that wants you fills its whole row and
 pulses, which reads from across a desk in a way six-pixel text does not.
+
+**The alarm decays.** It pulses for two minutes, then holds a static red for
+another eight, then settles to an amber dot and sinks below the working sessions.
+Leaving a session parked is a normal way to work, and a red light that never goes
+out is one you stop reading. Both timings are config. See
+[the attention ladder](docs/architecture.md#the-attention-ladder).
 
 Details: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md), [docs/claude-code-integration.md](docs/claude-code-integration.md).
 

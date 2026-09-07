@@ -33,9 +33,9 @@ Two of these are more useful than they first look:
 | `SessionStart` | Session opens, resumes, clears, compacts, or forks | Create session as `STARTING` |
 | `UserPromptSubmit` | You send a prompt | `WORKING`, clears any error |
 | `PostToolUse` | After each tool call, carries `tool_name` | `WORKING`, refreshes the staleness timer |
-| `PermissionRequest` | Claude Code needs permission for a tool | `NEEDS_INPUT` |
+| `PermissionRequest` | Claude Code needs permission for a tool | `NEEDS_INPUT`, if not already waiting |
 | `PermissionDenied` | You denied it | `WORKING`, the prompt was answered |
-| `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below |
+| `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below, if not already waiting |
 | `Stop` | Claude finished its turn | `IDLE` |
 | `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
 | `SessionEnd` | Session closes | `ENDED` |
@@ -53,6 +53,8 @@ The documented `notification_type` values include far more than attention prompt
 `permission_prompt`, `idle_prompt`, `elicitation_dialog`, `elicitation_url_dialog`, `agent_needs_input`
 
 The rest are informational and only refresh the activity timer: `auth_success`, `elicitation_complete`, `elicitation_response`, `agent_completed`, and the `quota_auto_resume_*` family. `idle_prompt` fires after Claude has been waiting a while, which catches the case where you were asked a question and did not notice.
+
+**A repeat notification does not restart the alarm.** `idle_prompt` fires again and again while nobody answers, so a session already on the attention ladder only has its activity timer refreshed; the rung it has reached is left alone. Without that the display would re-arm the pulse every few minutes and a parked session would blink indefinitely, which is what it used to do. See [the attention ladder](architecture.md#the-attention-ladder).
 
 ### Timing
 

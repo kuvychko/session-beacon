@@ -12,7 +12,7 @@ Sent whenever host state changes, and at least once per second while any session
 {"t":"snap","v":1,"ts":1725480000,"n":4,"cost":4.2,"sel":1,"rl":{"h5":92,"d7":28},
  "s":[
   {"id":"a1b2c3d4","l":"session-beacon","st":"work","age":120,"ctx":62,"m":"fable5.1"},
-  {"id":"e5f6a7b8","l":"env_monitoring","st":"need","age":840,"ctx":41,"m":"opus"},
+  {"id":"e5f6a7b8","l":"env_monitoring","st":"held","age":840,"ctx":41,"m":"opus"},
   {"id":"c9d0e1f2","l":"homelab","st":"idle","age":5},
   {"id":"a3b4c5d6","l":"data-pipeline","st":"stale","age":360}
  ]}
@@ -37,8 +37,8 @@ Session object:
 |-------|------|---------|
 | `id` | string | First 8 chars of `session_id`. Used on device only for change detection. |
 | `l` | string | Label, max 16 chars, truncated by host. |
-| `st` | string | `start`, `work`, `need`, `err`, `idle`, `stale`, `end`. Drives the row's dot colour, and `need` fills the whole row. |
-| `age` | int | Seconds in current state. |
+| `st` | string | `start`, `work`, `need`, `held`, `wait`, `err`, `idle`, `stale`, `end`. Drives the row's dot colour. `need` and `held` fill the whole row; only `need` pulses. |
+| `age` | int | Seconds in current state. Across `need`, `held` and `wait` it keeps running rather than restarting at each rung, so it is the whole time the session has been waiting on a human. |
 | `ctx` | int | Context window used, percent. Optional. |
 | `m` | string | Model short name, max 8 chars. Optional. Shown only for the featured session. |
 | `tool` | string | Last tool name, max 10 chars. Optional, phase 2. |
@@ -66,5 +66,6 @@ Heartbeat every 10 s. Host logs it and uses its absence to detect a wedged devic
 
 - Lines longer than 1024 bytes are discarded by the device.
 - Unknown fields are ignored on both sides. Add fields freely; bump `v` only for breaking changes.
+- A new `st` value is not a breaking change. The device falls back to `start`'s grey for anything it does not recognise, so an old device driven by a new host renders the new state plainly rather than failing. `held` and `wait` were added this way: bumping `v` for them would have replaced a grey dot with a full-screen `protocol` error on every device not yet reflashed, which is the worse outcome by a wide margin. Bump `v` when the device would otherwise draw something *wrong*, not merely something dull.
 - The device shows a "no host" screen after 10 s without any message.
 - No ACKs. A corrupted line is fixed by the next snapshot.

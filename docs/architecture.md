@@ -116,7 +116,11 @@ stateDiagram-v2
     IDLE --> WORKING: UserPromptSubmit
     WORKING --> WORKING: PreToolUse / PostToolUse
     WORKING --> NEEDS_INPUT: PermissionRequest
+    NEEDS_INPUT --> NEEDS_HELD: after need_pulse_s
+    NEEDS_HELD --> WAITING: after need_red_s
     NEEDS_INPUT --> WORKING: PostToolUse / PermissionDenied
+    NEEDS_HELD --> WORKING: PostToolUse / PermissionDenied
+    WAITING --> WORKING: PostToolUse / PermissionDenied
     WORKING --> IDLE: Stop
     WORKING --> ERROR: StopFailure
     ERROR --> WORKING: UserPromptSubmit
@@ -125,6 +129,8 @@ stateDiagram-v2
     WORKING --> ENDED: SessionEnd
     IDLE --> ENDED: SessionEnd
     NEEDS_INPUT --> ENDED: SessionEnd
+    NEEDS_HELD --> ENDED: SessionEnd
+    WAITING --> ENDED: SessionEnd
     ENDED --> [*]: after grace period
 ```
 
@@ -134,7 +140,9 @@ State semantics:
 |-------|---------|--------|
 | `STARTING` | Session opened, no prompt yet | grey |
 | `WORKING` | Claude is running (thinking or using tools) | blue |
-| `NEEDS_INPUT` | Blocked on a permission prompt, or idle-waiting for you after a notification | red, pulsing |
+| `NEEDS_INPUT` | Blocked on a permission prompt, or idle-waiting for you after a notification. The first two minutes of it | red, pulsing |
+| `NEEDS_HELD` | Same thing, two to ten minutes in | red, static |
+| `WAITING` | Same thing, over ten minutes in | amber |
 | `ERROR` | The turn ended on an API error such as a rate limit or an overload | magenta |
 | `IDLE` | Claude finished its turn, waiting for the next prompt | green |
 | `STALE` | `WORKING` but no event for `stale_after_s` (default 300 s) | amber |
@@ -142,7 +150,53 @@ State semantics:
 
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
 
-`ERROR` exists because without it a rate-limited session keeps looking busy until the staleness timer fires minutes later, which reads as a dead editor rather than as something that stopped and is waiting for you. Sort order puts it just below `NEEDS_INPUT`.
+`ERROR` exists because without it a rate-limited session keeps looking busy until the staleness timer fires minutes later, which reads as a dead editor rather than as something that stopped and is waiting for you. Sort order puts it just below the red rungs of the attention ladder.
+
+### The attention ladder
+
+A session waiting on a human used to pulse red until something happened to it,
+and nothing in `tick()` ever retired that state. On this machine `/health`
+caught two sessions that had been pulsing for **13 hours and 9.7 hours**. Leaving
+a session parked is the normal way to work, so an alarm that never stops is
+wrong far more often than it is right, and an alarm that is usually wrong stops
+being read at all.
+
+`NEEDS_INPUT` is therefore three rungs, timed from when the session entered the
+family, not from the previous rung:
+
+| Rung | Elapsed | Treatment |
+|------|---------|-----------|
+| `NEEDS_INPUT` | 0 to `need_pulse_s` (120 s) | Filled red, pulsing |
+| `NEEDS_HELD` | to `need_red_s` (600 s) | Filled red, static |
+| `WAITING` | after that | An ordinary row with an amber dot |
+
+Three details are load-bearing, and each looks like a mistake until you know why.
+
+**Re-entering the family does not restart the ladder.** `idle_prompt` fires
+whenever Claude has been waiting a while, so an unanswered session is notified
+again and again. Re-arming on each notification would pulse forever, which is
+the exact behaviour the ladder removes — and it is the most likely explanation
+for those 13 hours. `_want_attention()` starts the ladder only on entry from
+outside; a tool call, a prompt or a `Stop` is what re-arms it.
+
+**The rungs do not reset `state_since`.** Every other transition goes through
+`set_state()`, which does. Here `state_since` is both the age on screen and the
+ladder's own origin, so resetting it would restart the age mid-wait and re-base
+the second threshold, putting `wait` twelve minutes in instead of ten.
+
+**`WAITING` sorts below `WORKING`, next to `STALE`.** It is where sessions left
+idle on purpose end up, so ranking it with the alarm states would park them in
+the top rows permanently and push actively working sessions off a six-row
+display. That is the same noise in a different place. Sinking the last rung is
+what makes the ladder subtract from the display rather than rearrange it.
+
+`WAITING` and `STALE` are drawn identically, which is a decision rather than a
+collision. "Busy but gone quiet" and "waiting on you for a while" ask a person
+for the same thing — look at this one when you get a chance — and in both the
+age is the informative part. They stay distinct on the wire so `/health`, the
+docs and the sort can tell them apart.
+
+Both thresholds are config, next to `stale_after_s`.
 
 Additional per-session info:
 
@@ -207,9 +261,9 @@ Two changes, both worth keeping:
 +----------------------------------------+
 | BEACON      4 active          $4.20    |  header, 16 px
 |----------------------------------------|
-|############ env_monitoring     14m ####|  row 1, filled red, pulsing
-| o session-beacon                 2m    |  row 2, blue dot
-| o data-pipeline                  6m    |  row 3, amber dot
+|############ env_monitoring     44s ####|  row 1, filled red, pulsing
+|############ data-pipeline       5m ####|  row 2, filled red, static
+| o session-beacon                 2m    |  row 3, blue dot
 | o homelab                        7s    |  row 4, green dot
 |                                        |
 |                                        |
@@ -236,6 +290,8 @@ Row colours:
 | State | Dot | Row treatment |
 |-------|-----|---------------|
 | `need` | none, the row itself is the signal | Filled edge to edge, alternating red-on-black and black-on-red twice a second |
+| `held` | none, as `need` | Filled edge to edge in red, static. Drawn once and never repainted |
+| `wait` | amber | Age also drawn amber. Identical to `stale`, deliberately |
 | `work` | blue | Plain |
 | `idle` | green | Plain |
 | `stale` | amber | Age also drawn amber |
@@ -276,7 +332,9 @@ than no percentage when the whole point is knowing where you stand now.
 
 The pulse alternates between two readable states rather than flashing text in and out, so the row reads as a pulse instead of a flicker. Because it is driven by a local timer, the host never has to send frames for it.
 
-If more than six sessions are live, the host sorts `need` first, then `work`, then the rest, and the header's active count reveals the overflow.
+Only `need` is repainted on the blink tick. A `held` row is the same fill held permanently in the phase `need` spends half its time in, so it is drawn once and then costs nothing per frame however many of them are on screen.
+
+If more than six sessions are live, the host sorts the red rungs first, then `work`, then the rest, and the header's active count reveals the overflow. Sessions that have been waiting long enough to reach `wait` sort below `work`, so a row of parked sessions cannot push a working one off the display.
 
 **Only changed regions are repainted.** A full repaint over software SPI is slow enough to be visible as a sweep, and the host resends a snapshot every second purely to advance the timers. The device keeps a record of what each row currently shows and compares the *formatted* age string rather than the raw seconds, so a row showing `14m` stays untouched for a full minute. In steady state a snapshot costs nothing to draw.
 

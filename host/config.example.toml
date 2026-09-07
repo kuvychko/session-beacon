@@ -8,6 +8,12 @@ port = "COM4"
 
 http_port = 47391      # must match the URL in the Claude Code hook commands
 stale_after_s = 300    # a busy session with no events for this long goes stale
+
+# A session waiting on you pulses red, then holds a static red, then settles to
+# amber. Both are measured from when it started waiting, not from the previous
+# rung, so these are 2 minutes of pulsing and 8 more of red.
+need_pulse_s = 120     # pulses for this long, then holds red without moving
+need_red_s = 600       # red for this long in total, then goes amber and quiet
 ended_grace_s = 30     # how long a closed session stays on screen
 max_rows = 6           # rows the display can show; the host sorts and truncates
 

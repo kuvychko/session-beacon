@@ -116,6 +116,8 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> 
 
     store = SessionStore(
         stale_after_s=cfg.stale_after_s,
+        need_pulse_s=cfg.need_pulse_s,
+        need_red_s=cfg.need_red_s,
         ended_grace_s=cfg.ended_grace_s,
         max_rows=cfg.max_rows,
         label_overrides=cfg.labels,

@@ -84,6 +84,82 @@ def test_error_sorts_above_working_below_needs_input():
     assert [r["st"] for r in st.snapshot(1)["s"]] == ["need", "err", "work"]
 
 
+def test_attention_ladder_de_escalates():
+    """Waiting on a human pulses, then holds red, then settles to amber."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest"), 0)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.NEEDS_INPUT
+
+    st.tick(119)
+    assert s.state == State.NEEDS_INPUT       # still pulsing just under 2 min
+    st.tick(121)
+    assert s.state == State.NEEDS_HELD        # static red
+
+    st.tick(599)
+    assert s.state == State.NEEDS_HELD        # still red just under 10 min
+    st.tick(601)
+    assert s.state == State.WAITING           # amber and quiet
+
+
+def test_ladder_keeps_the_age_running():
+    """The rungs must not reset state_since: it is both the displayed age and
+    the ladder's own origin, so resetting it would delay `wait` to 12 minutes."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest"), 0)
+    st.tick(121)
+    assert st.snapshot(121)["s"][0]["age"] == 121
+    st.tick(601)
+    assert st.snapshot(601)["s"][0]["age"] == 601
+
+
+def test_repeat_notification_does_not_restart_the_pulse():
+    """idle_prompt re-fires while nobody answers. Re-arming on each one would
+    pulse forever, which is exactly what the ladder exists to stop."""
+    st = SessionStore()
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 0)
+    st.tick(200)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_HELD
+
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 210)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_HELD
+    st.tick(220)
+    assert st.snapshot(220)["s"][0]["age"] == 220
+
+
+def test_ladder_re_arms_after_leaving_the_family():
+    """A session that was answered and later blocks again starts over."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest"), 0)
+    st.tick(700)
+    assert st.sessions["abc12345-0000"].state == State.WAITING
+
+    st.apply_event(ev("PostToolUse", tool_name="Bash"), 701)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+    st.apply_event(ev("PermissionRequest"), 702)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_waiting_sorts_below_working():
+    """A long-idle session must not crowd a working one off a six-row display."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest", sid="n", cwd="C:/Repos/n"), 0)
+    st.apply_event(ev("PermissionRequest", sid="h", cwd="C:/Repos/h"), 0)
+    st.apply_event(ev("PermissionRequest", sid="p", cwd="C:/Repos/p"), 0)
+    st.apply_event(ev("StopFailure", sid="e", cwd="C:/Repos/e", error_type="overloaded"), 0)
+    st.apply_event(ev("UserPromptSubmit", sid="w", cwd="C:/Repos/w"), 0)
+    # Walk h and p down the ladder, then bring n back to the top rung.
+    st.tick(601)
+    st.apply_event(ev("PermissionRequest", sid="h"), 601)   # no re-arm: stays wait
+    st.sessions["h"].state = State.NEEDS_HELD               # place one on rung 2
+    st.apply_event(ev("PostToolUse", sid="n", tool_name="Bash"), 601)
+    st.apply_event(ev("PermissionRequest", sid="n"), 602)
+    st.apply_event(ev("UserPromptSubmit", sid="w"), 602)
+
+    assert [r["st"] for r in st.snapshot(603)["s"]] == [
+        "need", "held", "err", "work", "wait"]
+
+
 def test_ctx_pct_from_statusline():
     st = SessionStore()
     st.apply_status({
