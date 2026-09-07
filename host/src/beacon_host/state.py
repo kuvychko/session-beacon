@@ -177,8 +177,9 @@ class SessionStore:
 
         Re-entry must not restart the pulse. `idle_prompt` fires whenever Claude
         has been waiting a while, so a session nobody answers is notified again
-        and again; resetting the rung on each one would pulse forever, which is
-        the whole thing the ladder exists to stop. The ladder re-arms only after
+        and again -- two were captured for one session minutes apart, see
+        tests/fixtures -- and resetting the rung on each would pulse forever,
+        which is the whole thing the ladder exists to stop. The ladder re-arms only after
         the session has genuinely left the family, via a tool call, a prompt or
         a Stop.
         """

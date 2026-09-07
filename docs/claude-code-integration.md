@@ -192,7 +192,8 @@ Three different levels, and the difference matters.
 
 **Observed on this machine**, captured by running the daemon with `--capture` against
 Claude Code 2.1.261 and saved to `host/tests/fixtures/hook_payloads.jsonl`:
-`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`.
+`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`
+(`notification_type: "idle_prompt"`, carrying a `message`), `Stop`, `SessionEnd`.
 
 **Also observed**: a `Stop` carrying a populated `background_tasks`, captured by
 ending a turn with a subagent still running and saved to
@@ -201,10 +202,15 @@ seen long before, which showed the field existed but not the shape of an entry.
 
 **Present in the CLI binary but not yet seen firing**: `PermissionRequest`,
 `PermissionDenied`, `StopFailure`, `PostToolUseFailure`, `SubagentStop`, and the
-`notification_type` values `permission_prompt`, `idle_prompt` and `agent_needs_input`.
-These are the events that drive the attention state, so they are the ones still worth
-confirming. Triggering them needs an interactive permission prompt, which a headless
-run cannot produce.
+`notification_type` values `permission_prompt` and `agent_needs_input`. Triggering
+them needs an interactive permission prompt, which a headless run cannot produce.
+
+`idle_prompt` has left this list. It was the load-bearing one, because it is the
+path by which an ordinary session that finished its turn ends up asking for
+attention, and it is now captured. Two of them arrived for the same session
+minutes apart with no answer in between, which turned "a repeated notification
+would re-arm the pulse forever" from a plausible explanation of a thirteen-hour
+red row into an observed mechanism.
 
 **Contradicted by observation**: the published schema this project was first built
 against does not match this build. The corrections are below.
@@ -245,6 +251,6 @@ committed fixtures contain no usernames or unredacted text.
 
 ## Still to confirm
 
-1. Trigger a real permission prompt with the daemon capturing, to confirm whether attention arrives as a `PermissionRequest` event, a `Notification` carrying `notification_type`, or both. The state machine handles all three paths, so it should work either way, but that is reasoning rather than evidence.
+1. ~~Confirm how attention arrives.~~ **Partly done.** A `Notification` carrying `notification_type: "idle_prompt"` is captured and committed. Whether a permission prompt *also* raises a dedicated `PermissionRequest` is still unobserved; the state machine handles both paths.
 2. ~~Capture a statusline payload.~~ **Done.** Captured and confirmed: `used_percentage` 54 against a `context_window_size` of 1000000, `model.display_name` `Opus 5`, and `rate_limits` present. What is still unobserved is the null case: `used_percentage` is documented as null early in a session and after a `/compact`, and the input-token fallback that covers it has only ever been exercised by unit tests.
 3. Watch a `StopFailure` land, most easily during a rate limit.

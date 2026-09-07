@@ -182,8 +182,9 @@ Three details are load-bearing, and each looks like a mistake until you know why
 **Re-entering the family does not restart the ladder.** `idle_prompt` fires
 whenever Claude has been waiting a while, so an unanswered session is notified
 again and again. Re-arming on each notification would pulse forever, which is
-the exact behaviour the ladder removes — and it is the most likely explanation
-for those 13 hours. `_want_attention()` starts the ladder only on entry from
+the exact behaviour the ladder removes. This is observed, not inferred: two
+`idle_prompt` notifications were captured for the same session minutes apart with
+no answer in between, which is how a row stays red for 13 hours. `_want_attention()` starts the ladder only on entry from
 outside; a tool call, a prompt or a `Stop` is what re-arms it.
 
 **The rungs do not reset `state_since`.** Every other transition goes through

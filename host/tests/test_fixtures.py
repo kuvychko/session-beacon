@@ -38,7 +38,8 @@ def events() -> dict[str, dict]:
 
 def test_fixtures_cover_the_observed_lifecycle(events):
     assert set(events) == {
-        "SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"
+        "SessionStart", "UserPromptSubmit", "PostToolUse", "Notification",
+        "Stop", "SessionEnd"
     }
 
 
@@ -173,3 +174,37 @@ def test_a_turn_ending_on_a_running_agent_does_not_go_idle(background_stop, even
 
 def test_background_stop_fixture_is_already_redacted(background_stop):
     assert redact(background_stop) == background_stop
+
+
+def test_the_real_idle_prompt_drives_the_attention_state(events):
+    """The attention path, from a captured payload rather than a hand-written one.
+
+    `idle_prompt` was on the "present in the binary but never seen firing" list
+    for a long time, which made the red row the one part of the display resting
+    on reasoning. This is that payload.
+    """
+    n = events["Notification"]
+    assert n["notification_type"] == "idle_prompt"
+
+    store = SessionStore()
+    store.apply_event(events["UserPromptSubmit"], 0)
+    sid = events["UserPromptSubmit"]["session_id"]
+    store.apply_event({**n, "session_id": sid}, 1)
+    assert store.sessions[sid].state == State.NEEDS_INPUT
+
+
+def test_a_repeated_real_idle_prompt_does_not_restart_the_pulse(events):
+    """Captured twice for one session, minutes apart, which is why the ladder
+    only arms on entry: re-arming on each would pulse for as long as the session
+    sits unanswered."""
+    n = events["Notification"]
+    store = SessionStore()
+    sid = "repeat-test"
+    store.apply_event({**n, "session_id": sid}, 0)
+    store.tick(200)
+    assert store.sessions[sid].state == State.NEEDS_HELD
+
+    store.apply_event({**n, "session_id": sid}, 210)
+    store.tick(220)
+    assert store.sessions[sid].state == State.NEEDS_HELD
+    assert store.snapshot(220)["s"][0]["age"] == 220

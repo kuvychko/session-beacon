@@ -131,14 +131,21 @@ display, and the whole path has been exercised on real hardware.
 
 Verified on the bench: wiring and panel colour order, firmware rendering and its
 timers, the daemon and its state machine, hook delivery from live sessions,
-session labelling, and hardware SPI at 24 MHz.
+session labelling, hardware SPI at 24 MHz, session state surviving a daemon
+restart, and the attention state from a captured `idle_prompt`.
 
-**One gap worth knowing about.** The events that drive the attention state,
-`PermissionRequest` and the attention `Notification` types, have not been seen
-firing yet. They are present in the Claude Code binary and the state machine
-handles all the paths they could arrive by, but triggering one needs an
-interactive permission prompt, which a scripted run cannot produce. Everything
-around it is confirmed; that one signal is still reasoning rather than evidence.
+**The attention path is now evidence rather than reasoning.** It was the one
+part of the display resting on inference: the events that drive a red row had
+never been seen firing. A `Notification` carrying `notification_type:
+"idle_prompt"` has since been captured and is committed as a fixture, and it
+arrived *twice* for the same unanswered session, which is why the alarm arms
+only when a session first starts waiting.
+
+**One gap left.** `PermissionRequest` still has not been observed. It needs an
+interactive permission prompt, which a scripted run cannot produce, and sessions
+here mostly run in a mode that never raises one. The state machine handles it
+and the notification path that covers the same ground is now confirmed, so the
+risk is small, but it is inference.
 
 The enclosure is printed and fitted, so it is a finished object rather than a
 breadboard. Remaining work is comfort rather than function: see
