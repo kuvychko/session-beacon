@@ -110,6 +110,16 @@ Leaving a session parked is a normal way to work, and a red light that never goe
 out is one you stop reading. Both timings are config. See
 [the attention ladder](docs/architecture.md#the-attention-ladder).
 
+The beacon also reports itself in the terminal, through the same status line that
+feeds it the cost and context figures:
+
+![The beacon marker in the Claude Code status line](photos/beacon_status_connected.png)
+
+The trailing `beacon` is the daemon confirming it is talking to the device. It
+turns into `beacon?` when it is not, which is how an unplugged display or a
+half-dead daemon announces itself without your having to look away from the
+terminal. Everything to its left comes from the same payload the device gets.
+
 Details: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md), [docs/claude-code-integration.md](docs/claude-code-integration.md).
 
 ---
@@ -169,7 +179,7 @@ host/                     Python daemon: hook receiver, state, serial link
 hooks/                    Example Claude Code settings, plus a payload capture tool
 scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
 enclosure/                Three printed parts plus an optional stand: SolidWorks source, STEP, and 3MF
-photos/                   Build and finished-device photos
+photos/                   Build and finished-device photos, and UI screenshots
 docs/                     Architecture, hardware, enclosure, protocol, integration, roadmap
 ```
 

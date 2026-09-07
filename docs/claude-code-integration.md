@@ -80,7 +80,36 @@ The fields the beacon uses:
 
 That fallback matters: `used_percentage` is documented as null early in a session and again after a compaction until the next API call. Without it the footer would blank out at exactly the moments you are most likely to be looking.
 
-`beacon_hook.py --statusline` forwards the payload to `POST /status` and then prints a status line so the terminal still shows something useful. If you already have a custom statusline, it can be wrapped rather than replaced. That is a phase 2 detail.
+### What it looks like
+
+The installed status line is not a script. `curl` POSTs the payload to `/status`
+and the daemon composes the reply, which curl prints; that keeps a second Python
+interpreter off a path that runs on every status refresh. `beacon_hook.py
+--statusline` does the same job and remains as a fallback for machines without
+curl, but it prints a shorter line of its own.
+
+![The status line with the beacon connected](../photos/beacon_status_connected.png)
+
+Five fields, joined by two spaces, every one but the last omitted when it is
+missing: model, the working directory's basename, context percentage, total cost,
+and the marker. Note the basename — this is the one place the label is *not* the
+enclosing repository, so a session working in `host/` reads as `host` here while
+its row on the device still reads `session-beacon`.
+
+![The same status line with no device attached](../photos/beacon_status_disconnected.png)
+
+`beacon?` is the daemon saying it is running but cannot see the device, which is
+the difference between "the hooks are broken" and "the USB cable is out". It is
+worth having in the terminal because the failure it reports is the one you cannot
+diagnose by looking at the beacon.
+
+That shot also happens to show the null-context case: there is no `ctx` segment
+because `used_percentage` is null early in a session and after a compaction, and
+the token fallback had nothing to work from either. A missing `ctx` is not a
+second fault.
+
+If you already have a custom statusline, `install-hooks.ps1` saves it and
+`uninstall.ps1` puts it back.
 
 ### Account-level usage is available after all
 
