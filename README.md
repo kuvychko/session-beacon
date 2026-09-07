@@ -276,6 +276,12 @@ If the display says `no sessions`, the daemon and the wiring are fine and
 Claude Code simply is not calling the hooks. Check `events_received` at
 `/health`, then re-run `install-hooks.ps1` and restart your sessions.
 
+If the display shows *fewer* sessions than you have open, that is a different
+fault and the hooks are not the cause. A session sitting on a prompt sends no
+events, so it is only known to the daemon from its saved state; check the `rows`
+field at `/health` against what is on screen. Sessions untouched for more than
+`restore_max_age_s` are deliberately not restored after a restart.
+
 If the footer says `no statusline data`, everything else is working but the
 statusline hook is not installed. That hook is the only source of cost and
 context figures. Re-run `install-hooks.ps1 -WithStatusLine` and restart your

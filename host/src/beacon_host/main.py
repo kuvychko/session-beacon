@@ -21,9 +21,9 @@ import sys
 import time
 from pathlib import Path
 
-from . import hook_server
+from . import hook_server, persist
 from .capture import Capture
-from .config import Config, default_config_path
+from .config import Config, default_config_path, default_state_path
 from .serial_link import SerialLink
 from .state import SessionStore
 
@@ -31,6 +31,8 @@ log = logging.getLogger("beacon_host")
 
 TICK_S = 0.05        # main loop granularity
 PUSH_EVERY_S = 1.0   # resend at least this often so on-device timers advance
+SAVE_EVERY_S = 5.0   # floor on how often session state is written to disk
+BIND_RETRY_S = 5.0   # how long to wait out a predecessor still shutting down
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -43,6 +45,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--capture", metavar="FILE",
                     help="append redacted hook payloads to FILE as JSONL, "
                          "for building test fixtures")
+    ap.add_argument("--no-persist", action="store_true",
+                    help="do not save or restore session state across restarts")
     ap.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     ap.add_argument("--dry-run", action="store_true",
                     help="print snapshots instead of using serial")
@@ -90,7 +94,8 @@ def setup_logging(cfg: Config) -> None:
         logging.getLogger("beacon_host").warning(problem)
 
 
-def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> int:
+def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
+        persist_state: bool = True) -> int:
     stopping = False
 
     def stop(signum, _frame):
@@ -105,12 +110,23 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> 
             signal.signal(sig, stop)
 
     q: queue.Queue = queue.Queue(maxsize=10_000)
-    try:
-        srv = hook_server.start(q, port=cfg.http_port)
-    except OSError as e:
-        log.error("cannot bind 127.0.0.1:%d (%s). Another beacon-host running?",
-                  cfg.http_port, e)
-        return 1
+    # The port is no longer shareable, so a restart can arrive before the
+    # previous daemon has finished exiting and lose the bind by a fraction of a
+    # second. Retry briefly to tell that apart from a daemon that is genuinely
+    # still running: the predecessor goes away in well under a second, while a
+    # live one is still there at the end and the error below is then true.
+    srv = None
+    deadline = time.time() + BIND_RETRY_S
+    while True:
+        try:
+            srv = hook_server.start(q, port=cfg.http_port)
+            break
+        except OSError as e:
+            if time.time() >= deadline:
+                log.error("cannot bind 127.0.0.1:%d (%s). Another beacon-host "
+                          "running?", cfg.http_port, e)
+                return 1
+            time.sleep(0.25)
     log.info("listening on 127.0.0.1:%d", cfg.http_port)
     log.info("config: %s", cfg.source or "none found, using defaults")
 
@@ -122,6 +138,15 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> 
         max_rows=cfg.max_rows,
         label_overrides=cfg.labels,
     )
+    # A parked session sends no hook events, so without this a restart drops
+    # every session waiting on the user and the display silently under-reports
+    # until each one is next touched. --dry-run never persists: it is a
+    # debugging mode and should not disturb the real daemon's state.
+    state_path = None
+    if persist_state and not dry_run:
+        state_path = Path(cfg.state_file) if cfg.state_file else default_state_path()
+        persist.load(state_path, store, time.time(), cfg.restore_max_age_s)
+
     link = None if dry_run else SerialLink(cfg.port)
     hook_server.set_device_ok(bool(dry_run))
 
@@ -131,6 +156,7 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> 
 
     last_key: str | None = None
     last_push = 0.0
+    last_save = 0.0
     events_received = 0
     last_event_at: float | None = None
     warned_no_events = False
@@ -190,11 +216,25 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None) -> 
                     # screen say that" should not need a serial cable.
                     rows=[f"{r['l']}:{r['st']}:{r['age']}s" for r in snap["s"]],
                 )
+                # Tied to a real change rather than the once-a-second timer
+                # push, so a quiet desk does not rewrite the file all day.
+                if state_path and key != last_key and now - last_save >= SAVE_EVERY_S:
+                    persist.save(state_path, store, now)
+                    last_save = now
                 last_key, last_push = key, now
 
             time.sleep(TICK_S)
     finally:
         srv.shutdown()
+        # Without this the socket is only released when the process exits, which
+        # widens the window in which a restarting daemon cannot get the port.
+        srv.server_close()
+        # The throttle above means the last few seconds are usually unsaved,
+        # and a clean stop is exactly when that matters: install-task restarts
+        # the daemon, and anything missed here is a session gone from the
+        # display until it next does something.
+        if state_path:
+            persist.save(state_path, store, time.time())
         if link:
             link.close()
         log.info("stopped")
@@ -205,7 +245,8 @@ def main() -> None:
     args = parse_args()
     cfg = build_config(args)
     setup_logging(cfg)
-    sys.exit(run(cfg, dry_run=args.dry_run, capture_path=args.capture))
+    sys.exit(run(cfg, dry_run=args.dry_run, capture_path=args.capture,
+                 persist_state=not args.no_persist))
 
 
 if __name__ == "__main__":

@@ -213,12 +213,25 @@ beacon_host/
   state.py         SessionStore: apply_event(), apply_status(), tick(), snapshot()
   statusline.py    Composes the text returned to the statusline hook
   serial_link.py   Opens the COM port, writes snapshots, reconnects on loss
+  persist.py       Saves and restores the session store across daemon restarts
   config.py        TOML config: port, label overrides, thresholds, logging
 ```
 
 Threading model: the HTTP server thread pushes events onto a queue. The main loop drains the queue, updates state, ticks staleness, and writes one line to serial if the snapshot changed or one second has passed (so the elapsed timers advance). Serial writes stay single-threaded.
 
 Device discovery: `--port COMx` explicit, else auto-detect by USB VID/PID of the Nano ESP32 (VID 0x2341, PID 0x0070) via pyserial's port listing.
+
+**The daemon will not share its port.** `HTTPServer` sets `allow_reuse_address`, and on Windows `SO_REUSEADDR` lets a *second* process bind an address another process is already listening on — unlike Linux, where it only skips the `TIME_WAIT` delay. So a second daemon started cleanly, the "another beacon-host running?" check never fired, and the two split hook events between them at random. That was easy to hit by accident, because the quick start asks you to run `beacon-host --dry-run -v` while the scheduled task may already be running.
+
+The socket now refuses to be shared, which turns that silent split into a clear error. Two details make the strictness safe: the listening socket is closed on shutdown rather than at process exit, and the bind is retried for five seconds before giving up. A predecessor still exiting releases the port in well under a second, while a daemon that is genuinely running is still there at the end — so a fast restart succeeds and a real duplicate is still reported.
+
+**Session state survives a restart.** A session parked on a prompt sends no hook events at all, so there is nothing to re-register it. Holding state only in memory meant that every restart — at logon, after a crash, or to free the COM port for a reflash — silently dropped every waiting session, and the display then under-reported until each one was next touched. Worse, the symptom is a short display, which the troubleshooting guide otherwise blames on missing hooks: the wrong trail entirely.
+
+The store is written to `sessions.json` beside the log whenever the snapshot actually changes, throttled to once every five seconds, and again on a clean stop. Writes go to a temporary file and are then renamed, so an interrupted write cannot leave a truncated file that fails to load on every subsequent start.
+
+Timestamps are absolute and are not rebased on load: a session that has been waiting three hours should still read three hours. The consequence is that a session that was *working* when the daemon went down comes back past its staleness threshold and shows amber, which is honest — from the daemon's side it has been silent that long — and the next tool call corrects it.
+
+Nothing tells the daemon that a window was closed while it was down, because `SessionEnd` would have gone nowhere. A row untouched for longer than `restore_max_age_s` (default 24 h) is therefore treated as a ghost and dropped rather than restored. `--no-persist` turns the whole thing off, and `--dry-run` never persists, so debugging cannot disturb the real daemon's state.
 
 Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
 

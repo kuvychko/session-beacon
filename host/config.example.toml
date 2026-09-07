@@ -18,6 +18,14 @@ ended_grace_s = 30     # how long a closed session stays on screen
 max_rows = 6           # rows the display can show; the host sorts and truncates
 
 # log_file = "C:/Users/you/AppData/Local/session-beacon/beacon-host.log"
+
+# Session state is saved here and reloaded at startup, because a session parked
+# on a prompt sends no hook events: without it, a restart at logon drops every
+# waiting session and the display under-reports until you touch each one.
+# Defaults to sessions.json beside the log, which uninstall.ps1 already clears.
+# Run with --no-persist to switch it off.
+# state_file = "C:/Users/you/AppData/Local/session-beacon/sessions.json"
+restore_max_age_s = 86400   # on restart, ignore sessions untouched for longer
 log_level = "INFO"
 
 # Rows are labelled with the last path segment of the session's directory.

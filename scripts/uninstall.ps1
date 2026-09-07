@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Setting this up touches things outside the repository: a Scheduled Task, the
-    hooks in your Claude Code settings, a log directory, and a background daemon
-    holding a COM port. Deleting the repo would leave all of that behind, so the
+    hooks in your Claude Code settings, a data directory holding the logs and
+    saved session state, and a background daemon holding a COM port. Deleting the repo would leave all of that behind, so the
     undo path is a script rather than a paragraph in a README.
 
     Everything here is safe to run twice, and safe to run when only some of it
@@ -16,7 +16,8 @@
     Run with -WhatIf first to see exactly what it would touch.
 
 .PARAMETER KeepLogs
-    Leave the log directory in place.
+    Leave the data directory in place, including the logs and the saved session
+    state the daemon reloads at startup.
 
 .PARAMETER RemoveConfig
     Also delete host/config.local.toml and host/config.toml. Off by default:
@@ -91,16 +92,18 @@ if (Test-Path $SettingsPath) {
     $skipped.Add("no settings.json at $SettingsPath")
 }
 
-# ---- 4. Logs ----------------------------------------------------------------
+# ---- 4. Logs and saved session state -----------------------------------------
+# Removed together: sessions.json lives beside the log, and it is daemon state
+# rather than anything the user wrote, so it goes with the rest of the install.
 if ($KeepLogs) {
-    $skipped.Add("log directory kept on request")
+    $skipped.Add("data directory kept on request")
 } elseif (Test-Path $LogDir) {
-    if ($PSCmdlet.ShouldProcess($LogDir, "Remove log directory")) {
+    if ($PSCmdlet.ShouldProcess($LogDir, "Remove logs and saved session state")) {
         Remove-Item $LogDir -Recurse -Force
-        $done.Add("removed logs at $LogDir")
+        $done.Add("removed logs and session state at $LogDir")
     }
 } else {
-    $skipped.Add("no log directory at $LogDir")
+    $skipped.Add("no data directory at $LogDir")
 }
 
 # ---- 5. Local config, only when asked --------------------------------------

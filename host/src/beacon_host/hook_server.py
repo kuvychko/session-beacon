@@ -85,9 +85,27 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _Server(ThreadingHTTPServer):
+    """A server that refuses to share its port.
+
+    `HTTPServer` sets `allow_reuse_address`, and on Windows SO_REUSEADDR lets a
+    *second* process bind an address another process is already listening on --
+    unlike Linux, where it only skips the TIME_WAIT delay. So the second daemon
+    started cleanly, the "another beacon-host running?" check in main never
+    fired, and the two split hook events between them at random. That is easy to
+    hit, because the README asks you to run `beacon-host --dry-run -v` as a
+    setup step while the scheduled task is already running.
+
+    Turning it off costs only the TIME_WAIT wait on a quick restart, which the
+    daemon's own reconnect loop already tolerates.
+    """
+
+    allow_reuse_address = False
+
+
 def start(q: queue.Queue, host: str = HOST, port: int = PORT) -> ThreadingHTTPServer:
     _Handler.q = q
-    srv = ThreadingHTTPServer((host, port), _Handler)
+    srv = _Server((host, port), _Handler)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, name="hook-server", daemon=True).start()
     return srv

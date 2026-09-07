@@ -194,3 +194,28 @@ def test_logging_survives_an_unusable_log_path(tmp_path):
     setup_logging(Config(log_file=str(blocker / "nested" / "beacon.log")))
     logging.getLogger("beacon_host").info("still alive")
     logging.shutdown()
+
+
+def test_second_daemon_cannot_steal_the_port():
+    """A second bind must fail so main can report it, rather than silently
+    splitting hook events between two daemons.
+
+    HTTPServer sets allow_reuse_address, and on Windows that lets a second
+    process bind an address already being listened on. The README tells people
+    to run `beacon-host --dry-run -v` while the scheduled task is running, so
+    this is easy to hit by accident.
+    """
+    import queue as _queue
+
+    import pytest
+
+    from beacon_host import hook_server as hs
+
+    first = hs.start(_queue.Queue(), port=0)
+    try:
+        port = first.server_address[1]
+        with pytest.raises(OSError):
+            hs.start(_queue.Queue(), port=port)
+    finally:
+        first.shutdown()
+        first.server_close()
