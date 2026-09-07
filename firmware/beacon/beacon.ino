@@ -198,6 +198,11 @@ FooterView shownFooter;
 
 char lineBuf[LINE_BUF + 1];
 size_t lineLen = 0;
+// Set when a line outgrows the buffer, cleared at its newline. Without it the
+// first LINE_BUF bytes were dropped and the *tail* was then treated as a fresh
+// line: it does not start with '{', so it reached handleCommand() and printed
+// the help text. An over-long line is discarded whole, as the protocol says.
+bool lineOverflow = false;
 uint32_t lastMsgMs = 0;
 uint32_t lastBlinkMs = 0;
 uint32_t lastHbMs = 0;
@@ -712,18 +717,23 @@ void loop() {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
-      if (lineLen) {
+      if (lineOverflow) {
+        lineOverflow = false;   // the rest of an abandoned line, not a command
+      } else if (lineLen) {
         lineBuf[lineLen] = 0;
         rxLines++;
         if (lineBuf[0] == '{') parseMessage(lineBuf);
         else                   handleCommand(lineBuf);
-        lineLen = 0;
       }
+      lineLen = 0;
+    } else if (lineOverflow) {
+      // Still inside the over-long line; keep discarding to its newline.
     } else if (lineLen < LINE_BUF) {
       lineBuf[lineLen++] = c;
     } else {
       lineLen = 0;
-      rxDropped++;  // line longer than the buffer; abandoned
+      lineOverflow = true;
+      rxDropped++;  // line longer than the buffer; abandoned whole
     }
   }
 

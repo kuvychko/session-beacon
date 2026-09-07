@@ -6,7 +6,7 @@ Design goals: readable on a serial monitor, trivial to parse with ArduinoJson, a
 
 ## Snapshot
 
-Sent whenever host state changes, and at least once per second while any session is not `idle` so on-device timers stay honest. The device replaces its entire view with each snapshot. There are no deltas.
+Sent whenever host state changes, and at least once per second regardless, so the ages on screen keep advancing. The host does not check whether anything is happening first: the snapshot is small and the device repaints only the fields that changed, so an idle desk costs a line a second and no drawing. The device replaces its entire view with each snapshot. There are no deltas.
 
 ```json
 {"t":"snap","v":1,"ts":1725480000,"n":4,"cost":4.2,"sel":1,"rl":{"h5":92,"d7":28},
@@ -35,20 +35,20 @@ Session object:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `id` | string | First 8 chars of `session_id`. Used on device only for change detection. |
+| `id` | string | First 8 chars of `session_id`. The device stores it and does not currently use it; rows are matched by position. Useful when reading a snapshot on a serial monitor. |
 | `l` | string | Label, max 16 chars, truncated by host. |
 | `st` | string | `start`, `work`, `need`, `held`, `wait`, `err`, `idle`, `stale`, `end`. Drives the row's dot colour. `need` and `held` fill the whole row; only `need` pulses. |
 | `age` | int | Seconds in current state. Across `need`, `held` and `wait` it keeps running rather than restarting at each rung, so it is the whole time the session has been waiting on a human. |
 | `ctx` | int | Context window used, percent. Optional. |
 | `m` | string | Model short name, max 8 chars. Optional. Shown only for the featured session. |
-| `tool` | string | Last tool name, max 10 chars. Optional, phase 2. |
+| `tool` | string | Last tool name, max 10 chars. Optional. The host sends it whenever it knows one; the device does not read it yet, because a row has no space for it. See [roadmap.md](roadmap.md). |
 
 ## Other host messages
 
 ```json
 {"t":"hello","v":1,"host":"IGOR-PC"}
 ```
-Sent on connect and reconnect. Device clears the "no host" screen.
+Sent on connect and reconnect. It refreshes the device's last-message timestamp, which is what stops the "no host" screen appearing; the screen is actually cleared by the next snapshot, since `hello` carries nothing to draw.
 
 ```json
 {"t":"bl","pct":40}
@@ -58,13 +58,26 @@ Backlight brightness 0 to 100. Ignored until BL is wired to a PWM pin.
 ## Device to host (optional)
 
 ```json
-{"t":"hb","fw":"0.1.0","up":3600}
+{"t":"hb","fw":"0.1.0","up":3600,"rx":142,"bad":0,"drop":0,"since":412,"render":28,"spi":"hw"}
 ```
-Heartbeat every 10 s. Host logs it and uses its absence to detect a wedged device.
+Heartbeat every 3 s.
+
+| Field | Meaning |
+|-------|---------|
+| `fw` | Firmware version |
+| `up` | Seconds since boot |
+| `rx` | Lines accepted |
+| `bad` | Lines that failed to parse |
+| `drop` | Lines discarded for exceeding the buffer |
+| `since` | Milliseconds since the last accepted message |
+| `render` | Duration of the most recent repaint, ms |
+| `spi` | `hw` or `sw`, which SPI path is compiled in |
+
+These exist because a quiet host and a device that is dropping or failing to parse lines look identical from the outside: a screen reading "no host". The host currently logs the line at debug level and nothing more. Using its absence to detect a wedged device is not implemented; see [roadmap.md](roadmap.md).
 
 ## Rules
 
-- Lines longer than 1024 bytes are discarded by the device.
+- Lines longer than 1024 bytes are discarded by the device, including the remainder after the overflow, and counted in the heartbeat's `drop`.
 - Unknown fields are ignored on both sides. Add fields freely; bump `v` only for breaking changes.
 - A new `st` value is not a breaking change. The device falls back to `start`'s grey for anything it does not recognise, so an old device driven by a new host renders the new state plainly rather than failing. `held` and `wait` were added this way: bumping `v` for them would have replaced a grey dot with a full-screen `protocol` error on every device not yet reflashed, which is the worse outcome by a wide margin. Bump `v` when the device would otherwise draw something *wrong*, not merely something dull.
 - The device shows a "no host" screen after 10 s without any message.

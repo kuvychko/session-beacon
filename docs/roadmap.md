@@ -42,6 +42,10 @@ Done:
 
 Still open:
 
+- **Act on a missing heartbeat.** The device sends one every 3 s carrying its
+  receive, parse-failure and drop counters, and the daemon logs it at debug level
+  and nothing more. Using its absence to spot a wedged device is described in
+  `docs/protocol.md` as though it happens; it does not.
 - **Last tool name per row.** The host already records it and the protocol carries a
   `tool` field; nothing draws it. There is no room on a row without giving up label
   width, so it needs a layout decision rather than plumbing.
