@@ -211,9 +211,21 @@ it yet.
 ```powershell
 cd host
 uv sync
-uv run pytest                        # 38 tests, no hardware needed
+uv run pytest                        # 51 tests, no hardware needed
 uv run beacon-host --dry-run -v      # prints snapshots, Ctrl-C to stop
 cd ..
+```
+
+`--dry-run` still binds the HTTP port, and the daemon refuses to share it, so
+this exits with `cannot bind 127.0.0.1:47391` if one is already running. That is
+deliberate: two daemons on one port would split the hook events between them at
+random and neither would show the whole picture. If you have already reached
+step 5, stop the scheduled task first and start it again afterwards:
+
+```powershell
+Stop-ScheduledTask -TaskName SessionBeacon
+# ... run the daemon in the foreground ...
+Start-ScheduledTask -TaskName SessionBeacon
 ```
 
 ### 3. Terminal 1: start the daemon and leave it running
