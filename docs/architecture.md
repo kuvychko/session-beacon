@@ -114,13 +114,13 @@ stateDiagram-v2
     [*] --> STARTING: SessionStart
     STARTING --> WORKING: UserPromptSubmit
     IDLE --> WORKING: UserPromptSubmit
-    WORKING --> WORKING: PreToolUse / PostToolUse
+    WORKING --> WORKING: PreToolUse / PostToolUse / PostToolBatch
     WORKING --> NEEDS_INPUT: PermissionRequest
     NEEDS_INPUT --> NEEDS_HELD: after need_pulse_s
     NEEDS_HELD --> WAITING: after need_red_s
-    NEEDS_INPUT --> WORKING: PostToolUse / PermissionDenied
-    NEEDS_HELD --> WORKING: PostToolUse / PermissionDenied
-    WAITING --> WORKING: PostToolUse / PermissionDenied
+    NEEDS_INPUT --> WORKING: PostToolBatch / PostToolUse
+    NEEDS_HELD --> WORKING: PostToolBatch / PostToolUse
+    WAITING --> WORKING: PostToolBatch / PostToolUse
     WORKING --> IDLE: Stop (no background tasks)
     WORKING --> WORKING: Stop (background tasks running)
     WORKING --> ERROR: StopFailure

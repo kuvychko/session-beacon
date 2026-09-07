@@ -50,8 +50,14 @@ $stashPath = Join-Path (Split-Path $settingsPath) ".session-beacon-saved-statusl
 
 # PostToolUse but not PreToolUse: one is enough for activity and staleness,
 # and skipping the other halves the cost on the busiest event.
+#
+# PostToolBatch is registered as well, and is not redundant with PostToolUse. It
+# fires once after every call in a batch has resolved, including a call that
+# resolved by being rejected -- which runs no tool and so produces no
+# PostToolUse. It is the only event that arrives when you answer a prompt with
+# feedback, and without it the row stays red until Claude's next tool call.
 $events = @(
-    "SessionStart", "UserPromptSubmit", "PostToolUse",
+    "SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolBatch",
     "PermissionRequest", "PermissionDenied", "Notification",
     "Stop", "StopFailure", "SessionEnd"
 )

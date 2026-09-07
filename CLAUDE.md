@@ -37,12 +37,17 @@ docs/                        architecture, hardware, enclosure, protocol, claude
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
 - `host/tests/fixtures/` holds **real** captured payloads, not hand-written ones: `hook_payloads.jsonl` for the lifecycle, one per event, and `stop_with_background_tasks.json` for the populated `background_tasks` a plain `Stop` never shows. Refresh it with `beacon-host --capture FILE`. The published hook schema disagrees with what this build actually sends, so prefer a capture over the docs when the two conflict.
-- Capture redacts conversation content and every path but `cwd`, including free text nested inside `permission_suggestions` and `background_tasks`. Never commit a payload that has not been through `capture.redact`; a test guards every file in `host/tests/fixtures/`.
+- Capture redacts conversation content and every path but `cwd`, including free text nested inside `permission_suggestions`, `background_tasks` and a `PostToolBatch`'s `tool_calls`. Never commit a payload that has not been through `capture.redact`; a test guards every file in `host/tests/fixtures/`.
 - Session labels are the enclosing git repository's name, not the `cwd` basename. `cwd`
   moves as a session works and labelling from it directly mislabels any session that
   runs in a subdirectory. Overrides go in `host/config.local.toml` or `host/config.toml`,
   keyed by repo root or exact cwd, not in code.
 - Hook forwarding is done by Windows' built-in `curl.exe`, not a Python script, because process startup dominates hook cost. Do not "simplify" the hook commands back to a script without re-measuring.
+- `PostToolBatch` is registered alongside `PostToolUse` and is not a duplicate of
+  it. A prompt answered with "no" or with feedback runs no tool, so it produces
+  no `PostToolUse`, and `PermissionDenied` fires only for auto-mode classifier
+  denials; `PostToolBatch` is the only event that arrives when a human answers.
+  Drop it and every rejected prompt leaves a red row until the next tool call.
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
 - A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.

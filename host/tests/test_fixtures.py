@@ -39,7 +39,7 @@ def events() -> dict[str, dict]:
 def test_fixtures_cover_the_observed_lifecycle(events):
     assert set(events) == {
         "SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse",
-        "Notification", "Stop", "SessionEnd"
+        "PostToolBatch", "Notification", "Stop", "SessionEnd"
     }
 
 
@@ -124,6 +124,66 @@ def test_fixtures_carry_no_conversation_content(events):
                 assert str(p[field]).startswith("<"), f"{name}.{field} is not redacted"
         for k, v in (p.get("tool_input") or {}).items():
             assert str(v).startswith("<"), f"{name}.tool_input.{k} is not redacted"
+        # A batch nests both of the above one level down, once per call.
+        for i, call in enumerate(p.get("tool_calls") or []):
+            if "tool_response" in call:
+                msg = f"{name}.tool_calls[{i}].tool_response is not redacted"
+                assert str(call["tool_response"]).startswith("<"), msg
+            for k, v in (call.get("tool_input") or {}).items():
+                msg = f"{name}.tool_calls[{i}].tool_input.{k} is not redacted"
+                assert str(v).startswith("<"), msg
+
+
+def test_the_real_post_tool_batch_is_a_rejected_call(events):
+    """Captured by running the daemon with --capture on a spare port and driving
+    a headless `claude -p` whose Bash call was refused, which is the same
+    resolution a rejected prompt produces: the tool never ran, so the payload
+    carries the refusal as its `tool_response` and no PostToolUse accompanies it.
+    """
+    p = events["PostToolBatch"]
+    call = p["tool_calls"][0]
+    assert call["tool_name"] == "Bash"
+    assert call["tool_response"].startswith("<")
+    assert call["tool_input"]["command"].startswith("<")
+
+
+def test_a_rejected_prompt_clears_the_red_row(events):
+    """The bug, replayed from real payloads.
+
+    A plan rejected with feedback answers the prompt without running anything.
+    Before PostToolBatch was registered nothing arrived at that moment, so the
+    row stayed red for as long as Claude then spent thinking -- 68 seconds, in
+    the session that turned this up.
+    """
+    store = SessionStore()
+    store.apply_event(events["UserPromptSubmit"], 0)
+    sid = events["UserPromptSubmit"]["session_id"]
+
+    store.apply_event({**events["PermissionRequest"], "session_id": sid}, 1)
+    store.tick(200)
+    assert store.sessions[sid].state == State.NEEDS_HELD
+
+    store.apply_event({**events["PostToolBatch"], "session_id": sid}, 300)
+    assert store.sessions[sid].state == State.WORKING
+    assert store.sessions[sid].last_tool == "Bash"
+
+
+def test_redact_strips_a_batch_of_command_lines_and_output():
+    """The raw shape, before redaction: `tool_calls` carries a command line and
+    the text it printed, one level below the top-level names that were already
+    covered. Built by hand *because* it is the unredacted form -- the committed
+    fixture is the captured payload this produces."""
+    raw = {"hook_event_name": "PostToolBatch", "session_id": "s", "cwd": "C:/x",
+           "tool_calls": [{"tool_name": "Bash", "tool_use_id": "toolu_1",
+                           "tool_input": {"command": "git log --oneline",
+                                          "description": "list commits"},
+                           "tool_response": "4a26044 Capture the permission prompt"}]}
+    call = redact(raw)["tool_calls"][0]
+    assert call["tool_name"] == "Bash"
+    assert call["tool_use_id"] == "toolu_1"
+    assert call["tool_input"] == {"command": "<str len=17>",
+                                  "description": "<str len=12>"}
+    assert call["tool_response"] == "<str len=37>"
 
 
 def test_redact_is_idempotent(events):

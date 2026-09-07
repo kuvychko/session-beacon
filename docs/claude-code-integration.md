@@ -33,8 +33,9 @@ Two of these are more useful than they first look:
 | `SessionStart` | Session opens, resumes, clears, compacts, or forks | Create session as `STARTING` |
 | `UserPromptSubmit` | You send a prompt | `WORKING`, clears any error |
 | `PostToolUse` | After each tool call, carries `tool_name` | `WORKING`, refreshes the staleness timer |
+| `PostToolBatch` | Once every call in a turn's batch has resolved, carries `tool_calls` | `WORKING`, and it is what answers a prompt |
 | `PermissionRequest` | Claude Code needs permission for a tool | `NEEDS_INPUT`, if not already waiting |
-| `PermissionDenied` | You denied it | `WORKING`, the prompt was answered |
+| `PermissionDenied` | The auto-mode classifier denied a call, not a person; see below | `WORKING`, the prompt was answered |
 | `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below, if not already waiting |
 | `Stop` | Claude finished its turn, carries `background_tasks` | `IDLE`, or `WORKING` if background work is still running |
 | `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
@@ -52,6 +53,22 @@ It carries `tool_name`, a redacted `tool_input`, and `permission_suggestions`: t
 `ruleContent` is built from the command line, so it echoes the text that
 redacting `tool_input` exists to strip. Capture marks it, along with a
 background task's `description`; see below.
+
+**`PostToolBatch` is what tells us a prompt was answered.** Answering *yes* runs
+the tool, so `PostToolUse` arrives and the row clears. Answering *no*, or
+rejecting a plan with feedback, runs nothing: no `PostToolUse`, and no
+`PermissionDenied` either (see below), so before this event was registered
+nothing at all arrived at the moment you answered. The row stayed red for as
+long as Claude then spent thinking — 68 seconds in the session that turned this
+up, where a plan was rejected with feedback at 16:11:50 and the next tool call
+came at 16:12:58.
+
+`PostToolBatch` closes that gap because a rejected call still *resolves*: it
+fires once the batch is done, before the next model request, carrying the
+refusal text as that call's `tool_response`. It is one hook per batch rather
+than per tool, so it costs less than `PreToolUse` would and buys something
+`PreToolUse` cannot: `PreToolUse` fires just before the *next* tool call, which
+is exactly the moment the row was already clearing itself.
 
 **`PreToolUse` is deliberately not registered.** `PostToolUse` alone is enough for activity and staleness, and skipping `PreToolUse` halves the hook cost on the busiest event. Turn it on only if a hint of what a session is *about* to do turns out to be worth the latency. The state machine handles it either way.
 
@@ -207,6 +224,14 @@ Claude Code 2.1.261 and saved to `host/tests/fixtures/hook_payloads.jsonl`:
 `Notification` (`notification_type: "idle_prompt"`, carrying a `message`),
 `Stop`, `SessionEnd`.
 
+**Observed on 2.1.263**: a `PostToolBatch` for a call that was refused rather
+than run. Captured by pointing a throwaway settings file's hooks
+at a second daemon on a spare port and driving a headless `claude -p` whose
+`Bash` call hit an `ask` rule it could not surface — the same resolution a
+rejected prompt produces, and the payload confirms it: `tool_calls` carries the
+call with the refusal as its `tool_response`, and no `PostToolUse` accompanies
+it.
+
 **Also observed**: a `Stop` carrying a populated `background_tasks`, captured by
 ending a turn with a subagent still running and saved to
 `host/tests/fixtures/stop_with_background_tasks.json`. The empty list had been
@@ -219,11 +244,15 @@ seen long before, which showed the field existed but not the shape of an entry.
 **Registered, triggered, and did not fire**: `PermissionDenied`. Denying a Bash
 command at the interactive prompt produced a `PermissionRequest` and nothing
 else, with `PermissionDenied` present in `~/.claude/settings.json` at the time.
-Observed once, so it is a data point rather than a rule — it may fire only for a
-programmatic denial, such as a hook returning deny, rather than a person
-answering no. The state machine's `PermissionDenied` branch is therefore dead
-code on this build. It is kept because it is correct if the event ever arrives,
-and because the row corrects itself on the next tool call regardless.
+
+That is no longer a mystery. The CLI's own description of the event is "after
+auto mode classifier denies a tool call", and the dispatch is guarded on the
+denial having come from the auto-mode classifier: a person answering no takes
+the other branch, which writes the tool result and fires nothing. So the state
+machine's `PermissionDenied` branch is dead code on this build for every denial
+a human makes, and `PostToolBatch` — not `PermissionDenied` — is the event that
+marks a prompt as answered. It is kept because it is correct if a classifier
+denial ever arrives.
 
 `idle_prompt` has left this list. It was the load-bearing one, because it is the
 path by which an ordinary session that finished its turn ends up asking for
@@ -267,12 +296,14 @@ Conversation content is stripped as it is written. Prompts, tool arguments, tool
 responses and assistant messages become markers like `<str len=22>`, and every path
 except `cwd` is reduced to its last segment because the others carry a username.
 
-Two fields hide free text *inside* a structure rather than at the top level, and
-both are walked recursively: `permission_suggestions`, whose `ruleContent` is
-derived from the command line, and `background_tasks`, whose `description` names
-a running agent. Their shape survives — a task's `status`, a suggestion's
-`behavior` and `toolName` — because that is what the state machine and the tests
-read.
+Three fields hide free text *inside* a structure rather than at the top level,
+and all are walked recursively: `permission_suggestions`, whose `ruleContent` is
+derived from the command line; `background_tasks`, whose `description` names a
+running agent; and `tool_calls`, which is the whole of a `PostToolBatch` payload
+and nests a `tool_input` and a `tool_response` per call — the command line and
+its output, one level below the top-level names that were already covered. Their
+shape survives — a task's `status`, a suggestion's `behavior` and `toolName`, a
+call's `tool_name` — because that is what the state machine and the tests read.
 Field names and shapes survive, which is all a fixture needs. A test asserts the
 committed fixtures contain no usernames or unredacted text.
 

@@ -59,7 +59,12 @@ NESTED_CONTENT_KEYS = frozenset({"description", "ruleContent"})
 # Top-level fields holding structured data with free text somewhere inside.
 # Their shape is worth keeping: `status` tells a running background task from a
 # finished one, and `behavior`/`toolName` say what a suggestion would allow.
-STRUCTURED_FIELDS = frozenset({"background_tasks", "permission_suggestions"})
+#
+# `tool_calls` is the whole of a `PostToolBatch` payload, and it is the worst of
+# the three: every entry nests a `tool_input` and a `tool_response`, so the
+# command line and its output sit one level below the top-level names that
+# CONTENT_FIELDS already covers.
+STRUCTURED_FIELDS = frozenset({"background_tasks", "permission_suggestions", "tool_calls"})
 
 
 def _redact_nested(v: Any) -> Any:
@@ -67,10 +72,21 @@ def _redact_nested(v: Any) -> Any:
 
     Recursive because the nesting is not one level: a permission suggestion
     holds a list of rules, and the free text is inside those.
+
+    The content keys are the same ones the top level uses, plus NESTED_CONTENT_KEYS
+    and the same `tool_input` rule: a name below the top level is no less content
+    than the same name above it, and a batch entry has both.
     """
     if isinstance(v, dict):
-        return {k: (_marker(vv) if k in NESTED_CONTENT_KEYS else _redact_nested(vv))
-                for k, vv in v.items()}
+        out: dict[str, Any] = {}
+        for k, vv in v.items():
+            if k in NESTED_CONTENT_KEYS or k in CONTENT_FIELDS:
+                out[k] = _marker(vv)
+            elif k == "tool_input" and isinstance(vv, dict):
+                out[k] = {kk: _marker(v2) for kk, v2 in vv.items()}
+            else:
+                out[k] = _redact_nested(vv)
+        return out
     if isinstance(v, list):
         return [_redact_nested(item) for item in v]
     return v

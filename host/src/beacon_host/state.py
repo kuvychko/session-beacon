@@ -134,6 +134,17 @@ class SessionStore:
             # is handled too in case someone turns it on for finer resolution.
             s.last_tool = ev.get("tool_name", "") or s.last_tool
             s.set_state(State.WORKING, now)
+        elif name == "PostToolBatch":
+            # Fires once when every call in a batch has resolved, including one
+            # that resolved by being *rejected*: a denied tool never runs, so it
+            # produces no PostToolUse at all.
+            #
+            # This is the only event that lands at the moment a permission
+            # prompt is answered. Rejecting a plan with feedback left the row
+            # red for the minute Claude then spent thinking, because nothing
+            # else arrived until its next tool call.
+            s.last_tool = last_batch_tool(ev) or s.last_tool
+            s.set_state(State.WORKING, now)
         elif name == "PermissionRequest":
             # A dedicated event, more precise than watching Notification.
             self._want_attention(s, now)
@@ -321,6 +332,21 @@ class SessionStore:
         if s.last_tool:
             row["tool"] = s.last_tool[:10]
         return row
+
+
+def last_batch_tool(ev: dict[str, Any]) -> str:
+    """The last named tool in a PostToolBatch payload, or "".
+
+    The batch is one entry per tool call in the turn, in order, so the last one
+    is the closest equivalent of the `tool_name` the per-tool events carry.
+    """
+    calls = ev.get("tool_calls")
+    if not isinstance(calls, list):
+        return ""
+    for call in reversed(calls):
+        if isinstance(call, dict) and call.get("tool_name"):
+            return str(call["tool_name"])
+    return ""
 
 
 def running_background_tasks(ev: dict[str, Any]) -> int:

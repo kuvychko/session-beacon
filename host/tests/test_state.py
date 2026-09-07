@@ -52,6 +52,40 @@ def test_permission_request_and_denied():
     assert st.sessions["abc12345-0000"].state == State.WORKING
 
 
+def test_post_tool_batch_answers_a_prompt_no_tool_ever_ran():
+    """A rejected call runs no tool, so PostToolUse never arrives.
+
+    PostToolBatch fires once the batch resolves either way, which is the moment
+    the prompt was answered. Without it the row stayed red until Claude's next
+    tool call, a minute of thinking later.
+    """
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("PermissionRequest", tool_name="ExitPlanMode"), 1)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+    st.apply_event(ev("PostToolBatch", tool_calls=[
+        {"tool_name": "ExitPlanMode", "tool_use_id": "toolu_1",
+         "tool_input": {}, "tool_response": "rejected"}]), 2)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WORKING
+    assert s.last_tool == "ExitPlanMode"
+
+
+def test_post_tool_batch_names_the_last_tool_and_survives_a_bad_payload():
+    """A batch is one entry per call, so the last is the nearest thing to the
+    `tool_name` the per-tool events carry. A malformed list must not blank it."""
+    st = SessionStore()
+    st.apply_event(ev("PostToolBatch", tool_calls=[
+        {"tool_name": "Read"}, {"tool_name": "Bash"}]), 0)
+    assert st.sessions["abc12345-0000"].last_tool == "Bash"
+
+    st.apply_event(ev("PostToolBatch", tool_calls="nonsense"), 1)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WORKING
+    assert s.last_tool == "Bash"
+
+
 def test_stop_failure_is_error_not_stale():
     """A rate-limited turn must not masquerade as a busy session."""
     st = SessionStore()

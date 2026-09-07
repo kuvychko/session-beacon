@@ -144,8 +144,11 @@ session, which is why the alarm arms only when a session first starts waiting.
 
 **One surprise.** Refusing a permission prompt did not produce a
 `PermissionDenied`, though the hook was registered and the matching
-`PermissionRequest` arrived. Seen once, so it is a data point rather than a rule.
-Nothing depends on it: the row corrects itself on the next tool call.
+`PermissionRequest` arrived. The CLI turns out to reserve that event for denials
+made by the auto-mode classifier, not by a person, and a refused call runs no
+tool so there is no `PostToolUse` either. Answering a prompt with feedback
+therefore left the row red until Claude's next tool call. `PostToolBatch` — which
+fires once a batch resolves, refusals included — is what closes that gap.
 
 The enclosure is printed and fitted, so it is a finished object rather than a
 breadboard. Remaining work is comfort rather than function: see
