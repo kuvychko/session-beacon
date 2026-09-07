@@ -20,7 +20,9 @@ import pytest
 from beacon_host.capture import redact
 from beacon_host.state import SessionStore, State
 
-FIXTURES = Path(__file__).parent / "fixtures" / "hook_payloads.jsonl"
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+FIXTURES = FIXTURES_DIR / "hook_payloads.jsonl"
+BACKGROUND_STOP = FIXTURES_DIR / "stop_with_background_tasks.json"
 
 
 def load() -> dict[str, dict]:
@@ -110,9 +112,10 @@ def test_real_payload_label_resolves_to_the_repository(events, tmp_path):
 def test_fixtures_carry_no_conversation_content(events):
     """A guard against a future capture change leaking transcripts into the repo.
     Redacted values are markers like '<str len=22>', never the text itself."""
-    blob = FIXTURES.read_text(encoding="utf-8")
-    for leak in ("igork", "AppData", "C:\\\\Users"):
-        assert leak not in blob
+    for f in sorted(FIXTURES_DIR.iterdir()):
+        blob = f.read_text(encoding="utf-8")
+        for leak in ("igork", "AppData", "C:\\\\Users"):
+            assert leak not in blob, f"{f.name} leaks {leak!r}"
 
     for name, p in events.items():
         for field in ("prompt", "user_prompt", "last_assistant_message", "tool_response"):
@@ -127,3 +130,46 @@ def test_redact_is_idempotent(events):
     from a capture file without special-casing."""
     for p in events.values():
         assert redact(p) == p
+
+
+@pytest.fixture(scope="module")
+def background_stop() -> dict:
+    return json.loads(BACKGROUND_STOP.read_text(encoding="utf-8"))
+
+
+def test_background_stop_fixture_is_a_real_capture(background_stop):
+    """Captured from this machine by ending a turn with a subagent running.
+
+    The empty list in hook_payloads.jsonl showed the field existed but not what
+    a populated one looks like, which is why the fix waited on this rather than
+    guessing the shape.
+    """
+    tasks = background_stop["background_tasks"]
+    assert background_stop["hook_event_name"] == "Stop"
+    assert tasks and tasks[0]["status"] == "running"
+    assert tasks[0]["type"] == "subagent"
+    # Free text is stripped; the fields the state machine reads survive.
+    assert tasks[0]["description"].startswith("<")
+
+
+def test_a_turn_ending_on_a_running_agent_does_not_go_idle(background_stop, events):
+    """The false red, replayed from real payloads end to end."""
+    store = SessionStore()
+    store.apply_event(events["UserPromptSubmit"], 0)
+    sid = events["UserPromptSubmit"]["session_id"]
+
+    store.apply_event({**background_stop, "session_id": sid}, 1)
+    assert store.sessions[sid].state == State.WORKING
+
+    store.apply_event({"hook_event_name": "Notification", "session_id": sid,
+                       "cwd": background_stop["cwd"],
+                       "notification_type": "idle_prompt"}, 2)
+    assert store.sessions[sid].state == State.WORKING
+
+    # The real Stop from the earlier capture, with the list empty, ends the turn.
+    store.apply_event({**events["Stop"], "session_id": sid}, 3)
+    assert store.sessions[sid].state == State.IDLE
+
+
+def test_background_stop_fixture_is_already_redacted(background_stop):
+    assert redact(background_stop) == background_stop

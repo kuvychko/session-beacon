@@ -30,6 +30,10 @@ Done:
 - ~~Run at login (Task Scheduler, `pythonw`), log to a rotating file.~~ The script
   exists as `scripts/install-task.ps1`; installing it is a per-machine step.
 - ~~Cost and context percent in the footer from the statusline payload.~~
+- ~~A false red while a turn waited on background work.~~ **Done.** `Stop` carries
+  `background_tasks`; a turn that ends with a subagent running stays `WORKING`,
+  and `idle_prompt` is held back while any are outstanding. Fixed against a
+  captured payload rather than the guessed shape.
 - ~~Blink and stale handling polished.~~ The alarm now decays: it pulses for two
   minutes, holds a static red for eight more, then settles to an amber dot and
   sorts below the working sessions. A permanent blink had two sessions lit for
@@ -38,13 +42,6 @@ Done:
 
 Still open:
 
-- **A false red while a turn waits on background work.** A turn that ends with
-  background agents still running fires `Stop`, so the session reads as idle and
-  the next `idle_prompt` escalates it to red with nothing for anyone to do. The
-  `Stop` payload carries `background_tasks`, which is the discriminator; the only
-  captured `Stop` has it empty, so the fix waits on a capture of the non-empty
-  shape rather than a guess. The ladder caps the damage at two minutes of pulsing
-  in the meantime.
 - **Last tool name per row.** The host already records it and the protocol carries a
   `tool` field; nothing draws it. There is no room on a row without giving up label
   width, so it needs a layout decision rather than plumbing.

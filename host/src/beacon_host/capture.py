@@ -50,6 +50,27 @@ def _marker(v: Any) -> str:
     return f"<{type(v).__name__}>"
 
 
+def _redact_tasks(v: Any) -> Any:
+    """Keep the shape of `background_tasks`, drop the free text.
+
+    The state machine reads `status` to tell a running task from a finished one,
+    and `type`/`agent_type` say what it is. `description` is model- or
+    user-authored prose that can say anything, so it is marked like any other
+    content field. Nothing else in a payload nests this way, which is why redact
+    is otherwise flat.
+    """
+    if not isinstance(v, list):
+        return _marker(v)
+    out = []
+    for task in v:
+        if not isinstance(task, dict):
+            out.append(_marker(task))
+            continue
+        out.append({k: (_marker(vv) if k == "description" else vv)
+                    for k, vv in task.items()})
+    return out
+
+
 def redact(payload: dict[str, Any]) -> dict[str, Any]:
     """Keep the shape, drop the content.
 
@@ -62,6 +83,8 @@ def redact(payload: dict[str, Any]) -> dict[str, Any]:
     for k, v in payload.items():
         if k in CONTENT_FIELDS:
             out[k] = _marker(v)
+        elif k == "background_tasks":
+            out[k] = _redact_tasks(v)
         elif k == "tool_input" and isinstance(v, dict):
             # Argument names are useful; argument values are the user's data.
             out[k] = {kk: _marker(vv) for kk, vv in v.items()}

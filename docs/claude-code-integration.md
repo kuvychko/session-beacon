@@ -36,7 +36,7 @@ Two of these are more useful than they first look:
 | `PermissionRequest` | Claude Code needs permission for a tool | `NEEDS_INPUT`, if not already waiting |
 | `PermissionDenied` | You denied it | `WORKING`, the prompt was answered |
 | `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below, if not already waiting |
-| `Stop` | Claude finished its turn | `IDLE` |
+| `Stop` | Claude finished its turn, carries `background_tasks` | `IDLE`, or `WORKING` if background work is still running |
 | `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
 | `SessionEnd` | Session closes | `ENDED` |
 
@@ -53,6 +53,33 @@ The documented `notification_type` values include far more than attention prompt
 `permission_prompt`, `idle_prompt`, `elicitation_dialog`, `elicitation_url_dialog`, `agent_needs_input`
 
 The rest are informational and only refresh the activity timer: `auth_success`, `elicitation_complete`, `elicitation_response`, `agent_completed`, and the `quota_auto_resume_*` family. `idle_prompt` fires after Claude has been waiting a while, which catches the case where you were asked a question and did not notice.
+
+**`Stop` does not always mean you are up.** It carries `background_tasks`, and a
+turn that ends with a subagent still running has handed nothing back to a human.
+Observed shape:
+
+```json
+"background_tasks": [{"id": "a7c03d1af2...", "type": "subagent",
+                      "agent_type": "Explore", "status": "running",
+                      "description": "..."}]
+```
+
+Treating that as `IDLE` produced a real false alarm: the session went green, the
+next `idle_prompt` escalated it to a pulsing red row, and there was nothing for
+anyone to do. A session with running tasks is `WORKING` instead, and `idle_prompt`
+is held back while any are outstanding.
+
+Only `idle_prompt` is held back. It means no more than "Claude has been waiting a
+while", which is not the same as waiting on a person. The other attention types
+are direct asks — a permission prompt raised inside a subagent still needs
+answering — so they escalate regardless. A task with no `status` counts as
+running, because assuming it had finished is exactly the mistake that produces
+the false alarm.
+
+Note that this is intermittent rather than reliable, which is what made it
+awkward to catch: a subagent's own `PostToolUse` events carry the parent's
+`session_id` and keep flipping the row back to `WORKING`, so the red only appears
+when an `idle_prompt` lands in a quiet gap.
 
 **A repeat notification does not restart the alarm.** `idle_prompt` fires again and again while nobody answers, so a session already on the attention ladder only has its activity timer refreshed; the rung it has reached is left alone. Without that the display would re-arm the pulse every few minutes and a parked session would blink indefinitely, which is what it used to do. See [the attention ladder](architecture.md#the-attention-ladder).
 
@@ -166,6 +193,11 @@ Three different levels, and the difference matters.
 **Observed on this machine**, captured by running the daemon with `--capture` against
 Claude Code 2.1.261 and saved to `host/tests/fixtures/hook_payloads.jsonl`:
 `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`.
+
+**Also observed**: a `Stop` carrying a populated `background_tasks`, captured by
+ending a turn with a subagent still running and saved to
+`host/tests/fixtures/stop_with_background_tasks.json`. The empty list had been
+seen long before, which showed the field existed but not the shape of an entry.
 
 **Present in the CLI binary but not yet seen firing**: `PermissionRequest`,
 `PermissionDenied`, `StopFailure`, `PostToolUseFailure`, `SubagentStop`, and the

@@ -75,6 +75,7 @@ class Session:
     ctx_pct: int | None = None
     permission_mode: str = ""
     error_type: str = ""
+    bg_tasks: int = 0
 
     def set_state(self, new: State, now: float) -> None:
         if new != self.state:
@@ -126,6 +127,7 @@ class SessionStore:
             s.set_state(State.STARTING, now)
         elif name == "UserPromptSubmit":
             s.error_type = ""
+            s.bg_tasks = 0
             s.set_state(State.WORKING, now)
         elif name in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
             # Activity. Only PostToolUse is registered by default; PreToolUse
@@ -139,12 +141,25 @@ class SessionStore:
             # The prompt was answered, just not with a yes.
             s.set_state(State.WORKING, now)
         elif name == "Notification":
-            if ev.get("notification_type") in ATTENTION_NOTIFICATIONS:
-                self._want_attention(s, now)
-            else:
+            kind = ev.get("notification_type")
+            if kind not in ATTENTION_NOTIFICATIONS:
                 s.last_event = now
+            elif kind == "idle_prompt" and s.bg_tasks:
+                # `idle_prompt` only means Claude has been waiting a while,
+                # which is not the same as waiting on a human. The others in the
+                # set are direct asks -- a permission prompt raised inside a
+                # subagent still needs answering -- so only this one is held
+                # back, and only while background work is outstanding.
+                s.last_event = now
+            else:
+                self._want_attention(s, now)
         elif name == "Stop":
-            s.set_state(State.IDLE, now)
+            # A turn that ends with a background agent still running has not
+            # handed anything back: the session is waiting on the machine, not
+            # on a person. Calling that IDLE let the next idle_prompt escalate
+            # it to a red row with nothing for anyone to do.
+            s.bg_tasks = running_background_tasks(ev)
+            s.set_state(State.WORKING if s.bg_tasks else State.IDLE, now)
         elif name == "StopFailure":
             # The turn ended on an API error: rate limit, overload, billing.
             # Without this the session looks busy until it goes stale, which
@@ -299,6 +314,28 @@ class SessionStore:
         if s.last_tool:
             row["tool"] = s.last_tool[:10]
         return row
+
+
+def running_background_tasks(ev: dict[str, Any]) -> int:
+    """How many background tasks a Stop payload reports as still running.
+
+    Observed shape, captured from Claude Code 2.1.261:
+
+        "background_tasks": [{"id": "...", "type": "subagent",
+                              "agent_type": "Explore", "status": "running",
+                              "description": "..."}]
+
+    A task with no `status` counts as running. Assuming it had finished is the
+    mistake that produces the false alarm this exists to prevent, so the
+    unknown case takes the quieter side.
+    """
+    tasks = ev.get("background_tasks")
+    if not isinstance(tasks, list):
+        return 0
+    return sum(
+        1 for t in tasks
+        if isinstance(t, dict) and t.get("status", "running") == "running"
+    )
 
 
 def short_model(display_name: str) -> str:

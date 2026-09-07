@@ -1,0 +1,24 @@
+{
+  "background_tasks": [
+    {
+      "agent_type": "Explore",
+      "description": "<str len=23>",
+      "id": "a7c03d1af214724cc",
+      "status": "running",
+      "type": "subagent"
+    }
+  ],
+  "cwd": "C:\\Repos\\session-beacon",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "Stop",
+  "last_assistant_message": "<str len=680>",
+  "permission_mode": "auto",
+  "prompt_id": "fde73fcb-b916-4cd4-91e9-a86f90ad83d4",
+  "scratchpad_dir": "<path>/scratchpad",
+  "session_crons": [],
+  "session_id": "ddb073eb-7cec-489b-b9ce-e09750474d2d",
+  "stop_hook_active": false,
+  "transcript_path": "<path>/ddb073eb-7cec-489b-b9ce-e09750474d2d.jsonl"
+}

@@ -121,7 +121,8 @@ stateDiagram-v2
     NEEDS_INPUT --> WORKING: PostToolUse / PermissionDenied
     NEEDS_HELD --> WORKING: PostToolUse / PermissionDenied
     WAITING --> WORKING: PostToolUse / PermissionDenied
-    WORKING --> IDLE: Stop
+    WORKING --> IDLE: Stop (no background tasks)
+    WORKING --> WORKING: Stop (background tasks running)
     WORKING --> ERROR: StopFailure
     ERROR --> WORKING: UserPromptSubmit
     IDLE --> NEEDS_INPUT: Notification(idle_prompt)
@@ -147,6 +148,8 @@ State semantics:
 | `IDLE` | Claude finished its turn, waiting for the next prompt | green |
 | `STALE` | `WORKING` but no event for `stale_after_s` (default 300 s) | amber |
 | `ENDED` | Session closed; kept on screen briefly, then dropped | dim grey |
+
+`Stop` means the turn ended, not that a human is needed: it carries `background_tasks`, and a turn that ends with a subagent still running stays `WORKING`. Calling it `IDLE` let the next `idle_prompt` paint a red row with nothing to act on. See [claude-code-integration.md](claude-code-integration.md#hook-events-we-register).
 
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
 

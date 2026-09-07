@@ -160,6 +160,84 @@ def test_waiting_sorts_below_working():
         "need", "held", "err", "work", "wait"]
 
 
+def test_stop_with_background_work_is_not_idle():
+    """A turn that ends with an agent still running is waiting on the machine."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "agent_type": "Explore",
+         "status": "running", "description": "<str len=23>"}]), 1)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+    # The agent finishes, the turn really ends, and the session goes idle.
+    st.apply_event(ev("Stop", background_tasks=[]), 2)
+    assert st.sessions["abc12345-0000"].state == State.IDLE
+
+
+def test_idle_prompt_is_suppressed_while_background_work_runs():
+    """The false red: nothing for a human to do, so nothing should go red."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 1)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 2)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+    # Once the background work is done, the same notification does escalate.
+    st.apply_event(ev("Stop", background_tasks=[]), 3)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 4)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_real_asks_are_never_suppressed():
+    """A permission prompt raised inside a subagent still needs answering."""
+    for kind in ("permission_prompt", "agent_needs_input", "elicitation_dialog"):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=[
+            {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+        st.apply_event(ev("Notification", notification_type=kind), 1)
+        assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT, kind
+
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+    st.apply_event(ev("PermissionRequest", tool_name="Bash"), 1)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_finished_background_tasks_do_not_count():
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "completed"}, {"id": "a2", "status": "failed"}]), 0)
+    assert st.sessions["abc12345-0000"].state == State.IDLE
+
+
+def test_a_task_with_no_status_counts_as_running():
+    """The unknown case takes the quieter side: assuming a task had finished is
+    what produces the false alarm."""
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[{"id": "a1"}]), 0)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+def test_a_new_prompt_forgets_the_previous_turns_tasks():
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "running"}]), 0)
+    st.apply_event(ev("UserPromptSubmit"), 1)
+    assert st.sessions["abc12345-0000"].bg_tasks == 0
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 2)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_malformed_background_tasks_are_ignored():
+    """Never trust the payload's shape: a bad value must not crash the daemon."""
+    for bad in ("nonsense", 3, {"a": 1}, [None, 7, "x"], None):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=bad), 0)
+        assert st.sessions["abc12345-0000"].state == State.IDLE, repr(bad)
+
+
 def test_ctx_pct_from_statusline():
     st = SessionStore()
     st.apply_status({
