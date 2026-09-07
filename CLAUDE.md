@@ -13,11 +13,11 @@ Read `docs/architecture.md` before changing anything. The protocol in `docs/prot
 ```
 firmware/beacon/beacon.ino   Arduino sketch. Arduino IDE, board "Arduino Nano ESP32".
 host/                        Python 3.12+ package, managed with uv. Entry point: beacon-host.
-  src/beacon_host/           main, hook_server, state, serial_link, config
+  src/beacon_host/           main, hook_server, state, persist, serial_link, statusline, capture, config
   tests/                     pytest; fixtures are real hook payloads captured from Claude Code
 hooks/beacon_hook.py         Forwarder invoked by Claude Code hooks and statusline. Must stay fast.
 hooks/settings.example.json  Snippet to merge into ~/.claude/settings.json
-docs/                        architecture, hardware, protocol, claude-code-integration, roadmap
+docs/                        architecture, hardware, enclosure, protocol, claude-code-integration, roadmap
 ```
 
 ## Conventions
@@ -36,7 +36,7 @@ docs/                        architecture, hardware, protocol, claude-code-integ
 - `loop()` drains serial *before* taking `now`. Parsing repaints the screen and stamps `lastMsgMs` afterwards, so a `now` taken earlier would be in the past.
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
-- `host/tests/fixtures/hook_payloads.jsonl` holds **real** captured payloads, not hand-written ones. Refresh it with `beacon-host --capture FILE`. The published hook schema disagrees with what this build actually sends, so prefer a capture over the docs when the two conflict.
+- `host/tests/fixtures/` holds **real** captured payloads, not hand-written ones: `hook_payloads.jsonl` for the lifecycle, one per event, and `stop_with_background_tasks.json` for the populated `background_tasks` a plain `Stop` never shows. Refresh it with `beacon-host --capture FILE`. The published hook schema disagrees with what this build actually sends, so prefer a capture over the docs when the two conflict.
 - Capture redacts conversation content and every path but `cwd`. Never commit a payload that has not been through `capture.redact`; a test guards this.
 - Session labels are the enclosing git repository's name, not the `cwd` basename. `cwd`
   moves as a session works and labelling from it directly mislabels any session that

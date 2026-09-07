@@ -350,7 +350,7 @@ The pulse alternates between two readable states rather than flashing text in an
 
 Only `need` is repainted on the blink tick. A `held` row is the same fill held permanently in the phase `need` spends half its time in, so it is drawn once and then costs nothing per frame however many of them are on screen.
 
-If more than six sessions are live, the host sorts the red rungs first, then `work`, then the rest, and the header's active count reveals the overflow. Sessions that have been waiting long enough to reach `wait` sort below `work`, so a row of parked sessions cannot push a working one off the display.
+If more than six sessions are live, the host sorts the red rungs first, then `err`, then `work`, then the rest, and the header's active count reveals the overflow. Sessions that have been waiting long enough to reach `wait` sort below `work`, so a row of parked sessions cannot push a working one off the display.
 
 **Only changed regions are repainted.** A full repaint over software SPI is slow enough to be visible as a sweep, and the host resends a snapshot every second purely to advance the timers. The device keeps a record of what each row currently shows and compares the *formatted* age string rather than the raw seconds, so a row showing `14m` stays untouched for a full minute. In steady state a snapshot costs nothing to draw.
 

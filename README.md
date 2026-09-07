@@ -75,7 +75,7 @@ flowchart LR
 ```
 
 1. **Claude Code hooks** fire on session lifecycle events. Each one is a single `curl` call to the daemon, which measured about eight times cheaper than starting a Python interpreter per event.
-2. **beacon-host** keeps a per-session state machine (starting / working / needs input / error / idle / stale / ended), decides how loudly each one should be shown, enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
+2. **beacon-host** keeps a per-session state machine (starting / working / needs input, which decays through two quieter rungs / error / idle / stale / ended), decides how loudly each one should be shown, enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
 3. **Firmware** is deliberately dumb: it parses the snapshot and draws it. All policy lives on the host so it can change without reflashing.
 
 On the screen, one row per session:
