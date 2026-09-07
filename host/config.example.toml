@@ -28,8 +28,12 @@ max_rows = 6           # rows the display can show; the host sorts and truncates
 restore_max_age_s = 86400   # on restart, ignore sessions untouched for longer
 log_level = "INFO"
 
-# Rows are labelled with the last path segment of the session's directory.
-# Override where that is too long or ambiguous. Keys accept either separator.
+# Rows are labelled with the name of the git repository enclosing the session's
+# directory, not the directory itself: cwd moves as a session works, and
+# labelling straight from it showed this repo as "host" whenever anything ran in
+# host/. Override where the repo name is too long or ambiguous. Keys are matched
+# against both the exact directory and the resolved repository root, so keying
+# them by repo root works. Either separator is accepted.
 #
 # Use TOML *literal* strings, the single-quoted kind, for backslash paths.
 # A lone backslash inside a double-quoted TOML string is a parse error:

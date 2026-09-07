@@ -51,18 +51,28 @@ docs/                        architecture, hardware, enclosure, protocol, claude
 
 ## Commands
 
+From `host/`:
+
 ```powershell
-cd host
 uv sync
 uv run pytest
 uv run beacon-host --dry-run -v      # print snapshots, no hardware needed
 uv run beacon-host --port COM4 -v    # drive the display
+```
 
+From the repository root, not `host/`:
+
+```powershell
 curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device
 ./scripts/install-hooks.ps1          # Claude Code hooks; -Uninstall to remove
 ./scripts/install-task.ps1           # run at logon; -Uninstall to remove
 ./scripts/uninstall.ps1 -WhatIf      # undo everything; supports -WhatIf
 ```
+
+Running the daemon in the foreground needs the port, so stop the scheduled task
+first if it is installed: `Stop-ScheduledTask -TaskName SessionBeacon`, and
+`Start-ScheduledTask` afterwards. Two daemons no longer share a port, so the
+second one exits rather than quietly splitting the hook events.
 
 Hooks are read at session start. After `install-hooks.ps1` the user must
 restart their Claude Code sessions or nothing will arrive.
