@@ -408,3 +408,161 @@ def test_rate_limits_clamped_and_partial_accepted():
     st.apply_status({"session_id": "x", "rate_limits": {
         "five_hour": {"used_percentage": 130}}}, 0)
     assert st.snapshot(1)["rl"] == {"h5": 100}
+
+
+# ---- subagent attribution -------------------------------------------------
+#
+# A subagent's hook events carry the *parent's* session_id, so the only thing
+# separating them is `agent_id`. Treating them as the parent's own is what let a
+# session sit blocked on a human while its row showed WORKING.
+
+
+def test_a_subagents_tool_call_does_not_answer_the_parents_prompt():
+    """The reported bug: the parent is blocked, a subagent keeps working, and
+    every one of its tool calls repainted the red row blue."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("PermissionRequest", tool_name="Bash"), 1)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+    st.apply_event(ev("PostToolUse", tool_name="Grep", agent_id="a1",
+                      agent_type="Explore"), 2)
+    st.apply_event(ev("PostToolBatch", agent_id="a1", tool_calls=[
+        {"tool_name": "Grep"}]), 3)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_a_subagents_tool_call_still_keeps_the_session_off_stale():
+    """It refreshes the timer even though it does not change the state. A long
+    subagent run is the only traffic its session produces, so dropping the event
+    outright would send an actively working parent to STALE."""
+    st = SessionStore(stale_after_s=10)
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    for t in range(1, 30, 5):
+        st.apply_event(ev("PostToolUse", tool_name="Read", agent_id="a1"), t)
+        st.tick(t)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+def test_a_subagent_answers_the_prompt_it_raised_itself():
+    """A permission prompt raised inside a subagent is answered by that
+    subagent's own PostToolBatch, and nothing else arrives to say so."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("PermissionRequest", tool_name="Bash", agent_id="a1"), 1)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.NEEDS_INPUT and s.attn_agent == "a1"
+
+    # Another agent's work is not an answer.
+    st.apply_event(ev("PostToolUse", tool_name="Read", agent_id="a2"), 2)
+    assert s.state == State.NEEDS_INPUT
+    # The parent's own is not either: it never saw the prompt.
+    st.apply_event(ev("PostToolUse", tool_name="Read"), 3)
+    assert s.state == State.NEEDS_INPUT
+
+    st.apply_event(ev("PostToolBatch", agent_id="a1", tool_calls=[
+        {"tool_name": "Bash"}]), 4)
+    assert s.state == State.WORKING
+
+
+def test_agent_type_alone_is_the_main_thread():
+    """`agent_type` is also set on the main thread of a session started with
+    --agent, without `agent_id`. Filtering on it would ignore a real session's
+    every tool call, so only `agent_id` may be used."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest"), 0)
+    st.apply_event(ev("PostToolUse", tool_name="Bash", agent_type="code-reviewer"), 1)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+# ---- background work resolves without another Stop ------------------------
+
+
+def test_subagent_stop_resyncs_the_count_and_hands_back_to_the_user():
+    """The turn already ended, so no further Stop is coming. SubagentStop is the
+    only thing that can retire the count."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 1)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WORKING and s.bg_tasks == 1
+
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[]), 2)
+    assert s.bg_tasks == 0
+    assert s.state == State.IDLE
+
+
+def test_subagent_stop_does_not_count_the_agent_it_is_reporting():
+    """Its own payload may still list it as running; counting it would put the
+    stale count straight back."""
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "running"}]), 0)
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 1)
+    s = st.sessions["abc12345-0000"]
+    assert s.bg_tasks == 0 and s.state == State.IDLE
+
+
+def test_subagent_stop_leaves_the_row_alone_while_others_run():
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "running"}, {"id": "a2", "status": "running"}]), 0)
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[
+        {"id": "a2", "status": "running"}]), 1)
+    s = st.sessions["abc12345-0000"]
+    assert s.bg_tasks == 1 and s.state == State.WORKING
+
+
+def test_subagent_stop_without_background_tasks_decrements():
+    """The field is optional in the CLI's schema. An absent list must not read
+    as "nothing left running"."""
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "running"}, {"id": "a2", "status": "running"}]), 0)
+    st.apply_event(ev("SubagentStop", agent_id="a1"), 1)
+    assert st.sessions["abc12345-0000"].bg_tasks == 1
+    st.apply_event(ev("SubagentStop", agent_id="a2"), 2)
+    assert st.sessions["abc12345-0000"].bg_tasks == 0
+    # And it floors at zero rather than going negative.
+    st.apply_event(ev("SubagentStop", agent_id="a3"), 3)
+    assert st.sessions["abc12345-0000"].bg_tasks == 0
+
+
+def test_a_subagent_finishing_mid_turn_does_not_go_idle():
+    """Only a turn that had already ended hands back to the user."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[]), 1)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+def test_a_stale_background_count_stops_suppressing_idle_prompt():
+    """The other half of the bug. The count used to be recomputed only on the
+    next Stop, and a turn that has already ended may never produce one, so a
+    stale count swallowed every idle_prompt the session would ever send."""
+    st = SessionStore(bg_quiet_s=180)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "running"}]), 0)
+
+    # Inside the window the hold still applies: this is the false red it exists
+    # to prevent.
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 100)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+    # Past it, with nothing having confirmed the count since, it escalates.
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 400)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_a_running_subagent_keeps_the_hold_alive():
+    """A subagent emits hook events constantly, and each one is fresh evidence
+    that the count is real, so a genuinely busy session is never escalated."""
+    st = SessionStore(bg_quiet_s=180)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "status": "running"}]), 0)
+    for t in range(100, 600, 100):
+        st.apply_event(ev("PostToolUse", tool_name="Read", agent_id="a1"), t)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 600)
+    assert st.sessions["abc12345-0000"].state == State.WORKING

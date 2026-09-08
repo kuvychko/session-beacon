@@ -1,5 +1,5 @@
 {
-  "_comment": "Merge into ~/.claude/settings.json. Uses Windows' built-in curl, which measured ~15 ms per call against ~100-120 ms for a Python forwarder. No quoting needed and no dependency on which Python is on PATH. If beacon-host is not running, curl fails instantly and the hook is a no-op. PreToolUse is deliberately absent: PostToolUse alone covers activity and staleness at half the cost on the busiest event. PostToolBatch is not a duplicate of PostToolUse: it fires once per batch, and it is the only event that arrives when a tool call resolves by being rejected, which is how a row stops being red the moment you answer a prompt with feedback.",
+  "_comment": "Merge into ~/.claude/settings.json. Uses Windows' built-in curl, which measured ~15 ms per call against ~100-120 ms for a Python forwarder. No quoting needed and no dependency on which Python is on PATH. If beacon-host is not running, curl fails instantly and the hook is a no-op. PreToolUse is deliberately absent: PostToolUse alone covers activity and staleness at half the cost on the busiest event. PostToolBatch is not a duplicate of PostToolUse: it fires once per batch, and it is the only event that arrives when a tool call resolves by being rejected, which is how a row stops being red the moment you answer a prompt with feedback. SubagentStop fires once per subagent, not per tool call, and carries a fresh background_tasks list: it is the only event that recomputes the count when a subagent ends, and without it a turn that ended with an agent running could suppress every idle_prompt the session would ever send.",
 
   "hooks": {
     "SessionStart":      [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
@@ -10,6 +10,7 @@
     "PermissionDenied":  [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
     "Notification":      [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
     "Stop":              [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
+    "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
     "StopFailure":       [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }],
     "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "C:/Windows/System32/curl.exe -s --max-time 1 --data-binary @- http://127.0.0.1:47391/event" }] }]
   },

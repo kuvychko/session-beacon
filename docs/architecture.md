@@ -123,6 +123,7 @@ stateDiagram-v2
     WAITING --> WORKING: PostToolBatch / PostToolUse
     WORKING --> IDLE: Stop (no background tasks)
     WORKING --> WORKING: Stop (background tasks running)
+    WORKING --> IDLE: SubagentStop (the last one, turn already over)
     WORKING --> ERROR: StopFailure
     WORKING --> STALE: no event for stale_after_s
     STALE --> WORKING: PostToolUse / UserPromptSubmit
@@ -155,6 +156,18 @@ State semantics:
 
 `Stop` means the turn ended, not that a human is needed: it carries `background_tasks`, and a turn that ends with a subagent still running stays `WORKING`. Calling it `IDLE` let the next `idle_prompt` paint a red row with nothing to act on. See [claude-code-integration.md](claude-code-integration.md#hook-events-we-register).
 
+**That count has to be able to come back down.** It used to be recomputed only on
+the next `Stop` or `UserPromptSubmit`, and a turn that has already ended and is
+waiting on you produces neither -- so a count left positive suppressed every
+`idle_prompt` the session would ever send, and the row stayed blue however long you
+left it. `SubagentStop` is registered for exactly this: it fires when a subagent
+ends, carries a fresh `background_tasks`, and drops the row to `IDLE` when it was
+the last of them and the turn was already over. The hold also expires on its own
+after `bg_quiet_s` (default 180 s) without anything confirming the count, which is
+the backstop if that event is ever missed. A running subagent refreshes it
+constantly with its own hook events, so a genuinely busy session is never
+escalated.
+
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
 
 `ERROR` exists because without it a rate-limited session keeps looking busy until the staleness timer fires minutes later, which reads as a dead editor rather than as something that stopped and is waiting for you. Sort order puts it just below the red rungs of the attention ladder.
@@ -177,7 +190,18 @@ family, not from the previous rung:
 | `NEEDS_HELD` | to `need_red_s` (600 s) | Filled red, static |
 | `WAITING` | after that | An ordinary row with an amber dot |
 
-Three details are load-bearing, and each looks like a mistake until you know why.
+Four details are load-bearing, and each looks like a mistake until you know why.
+
+**Only the agent that raised a prompt can end the wait.** A subagent's hook events
+carry the *parent's* `session_id`, so treating them as the parent's own repainted a
+genuinely blocked row `WORKING` on every tool call the subagent made -- a session
+waiting on you could show blue indefinitely, which is the one thing the device is
+for. A tool event now clears an attention state only when its `agent_id` matches
+the one recorded when the session entered the family (`""` being the main thread).
+`PostToolBatch` still clears a prompt answered with feedback, and a subagent's own
+`PostToolBatch` still clears a prompt that subagent raised. The event refreshes the
+staleness timer regardless, because a long subagent run is the only traffic its
+session produces.
 
 **Re-entering the family does not restart the ladder.** `idle_prompt` fires
 whenever Claude has been waiting a while, so an unanswered session is notified

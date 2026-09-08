@@ -48,6 +48,13 @@ $statusCmd = "$curl -s --max-time 1 --data-binary @- $statusUrl"
 # it, so no unrecognised key ever lands in the settings Claude Code parses.
 $stashPath = Join-Path (Split-Path $settingsPath) ".session-beacon-saved-statusline.json"
 
+# SubagentStop is registered for the same kind of reason. It fires once per
+# subagent rather than per tool call, and it carries its own background_tasks
+# list, so it is the only event that recomputes the count at the moment a
+# subagent ends. Without it the count could only be refreshed by the parent's
+# next Stop, which never arrives if the parent has finished its turn and is
+# waiting on you -- and a stale count suppresses every idle_prompt after it.
+#
 # PostToolUse but not PreToolUse: one is enough for activity and staleness,
 # and skipping the other halves the cost on the busiest event.
 #
@@ -59,7 +66,7 @@ $stashPath = Join-Path (Split-Path $settingsPath) ".session-beacon-saved-statusl
 $events = @(
     "SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolBatch",
     "PermissionRequest", "PermissionDenied", "Notification",
-    "Stop", "StopFailure", "SessionEnd"
+    "Stop", "SubagentStop", "StopFailure", "SessionEnd"
 )
 
 if (-not (Test-Path $settingsPath)) {

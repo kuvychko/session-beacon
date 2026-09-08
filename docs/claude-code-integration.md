@@ -22,7 +22,18 @@ Field names below have been checked against payloads captured on this machine, n
 Two of these are more useful than they first look:
 
 - **`permission_mode`** says whether a session can block on you at all. One running in `bypassPermissions` will never raise a permission prompt, so a long silence there means something different than it does elsewhere. Captured now, displayed later.
-- **`agent_id` and `agent_type`** are present only inside subagents. Subagent activity is therefore distinguishable from the parent's, which contradicts an earlier note in this file claiming it was not.
+- **`agent_id`** is the field that separates a subagent's events from the parent's,
+  and it is now captured. A subagent's hooks carry the *parent's* `session_id` --
+  the whole run in `host/tests/fixtures/subagent_run.jsonl` is a single
+  `session_id` -- so nothing else distinguishes them. The CLI's own schema is
+  blunt about which field to use: "Present only when the hook fires from within a
+  subagent... Absent for the main thread, even in `--agent` sessions. **Use this
+  field (not `agent_type`) to distinguish subagent calls from main-thread
+  calls.**"
+- **`agent_type`** names the agent (`Explore`, `general-purpose`) and is *not* a
+  substitute. It is also set on the main thread of a session started with
+  `--agent`, without `agent_id`, so filtering on it would ignore that session's
+  every tool call.
 
 `SessionStart` carries `source`, with the value `startup` observed. `SessionEnd` carries `reason`, with `other` observed. Both differ from the published schema; see the verification section below.
 
@@ -38,6 +49,7 @@ Two of these are more useful than they first look:
 | `PermissionDenied` | The auto-mode classifier denied a call, not a person; see below | `WORKING`, the prompt was answered |
 | `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below, if not already waiting |
 | `Stop` | Claude finished its turn, carries `background_tasks` | `IDLE`, or `WORKING` if background work is still running |
+| `SubagentStop` | A subagent ended, carries `agent_id` and a fresh `background_tasks` | Recomputes the count; `IDLE` if that was the last of it and the turn had ended |
 | `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
 | `SessionEnd` | Session closes | `ENDED` |
 
@@ -104,10 +116,27 @@ answering — so they escalate regardless. A task with no `status` counts as
 running, because assuming it had finished is exactly the mistake that produces
 the false alarm.
 
-Note that this is intermittent rather than reliable, which is what made it
-awkward to catch: a subagent's own `PostToolUse` events carry the parent's
-`session_id` and keep flipping the row back to `WORKING`, so the red only appears
-when an `idle_prompt` lands in a quiet gap.
+**Two things used to break this, and both are fixed.** They are worth spelling out
+because between them a session blocked on a human could show `WORKING` for as long
+as you left it, which is the one case the device exists for.
+
+*A subagent's tool calls were counted as the parent's.* They carry the parent's
+`session_id`, and the state machine set `WORKING` on every one, so a genuinely red
+row was repainted blue each time a subagent touched a tool. The red only appeared
+if an `idle_prompt` happened to land in a quiet gap. A tool event now ends a wait
+only when its `agent_id` matches the one that raised it -- which still lets a
+`PostToolBatch` clear a rejected prompt, and still lets a subagent's own
+`PostToolBatch` clear a prompt that subagent raised. It refreshes the staleness
+timer either way: a long subagent run is the only traffic its session produces, so
+ignoring the events outright would send an actively working parent to `STALE`.
+
+*The count could latch on forever.* It was recomputed only on the next `Stop` or
+`UserPromptSubmit`. A turn that has already ended and is waiting on you produces
+neither, so a count left positive suppressed every `idle_prompt` the session would
+ever send and the row never went red at all. `SubagentStop` now recomputes it the
+moment a subagent ends. As a backstop the hold also expires: `idle_prompt` is only
+held while something has confirmed the count within `bg_quiet_s` (default 180 s),
+and a running subagent refreshes that constantly with its own events.
 
 **A repeat notification does not restart the alarm.** `idle_prompt` fires again and again while nobody answers, so a session already on the attention ladder only has its activity timer refreshed; the rung it has reached is left alone. Without that the display would re-arm the pulse every few minutes and a parked session would blink indefinitely, which is what it used to do. See [the attention ladder](architecture.md#the-attention-ladder).
 
@@ -237,9 +266,24 @@ ending a turn with a subagent still running and saved to
 `host/tests/fixtures/stop_with_background_tasks.json`. The empty list had been
 seen long before, which showed the field existed but not the shape of an entry.
 
+**Also observed**: a complete session that spawned an `Explore` subagent, saved to
+`host/tests/fixtures/subagent_run.jsonl`. It is kept as a sequence rather than
+folded into `hook_payloads.jsonl` because the order is the evidence: the subagent's
+`PostToolUse` and `PostToolBatch` events arrive under the parent's `session_id`
+with an `agent_id` set, and the parent's own `PostToolUse` for the `Agent` call
+lands only *after* `SubagentStop`. `SubagentStart` and `SubagentStop` both fire,
+and `SubagentStop` carries `background_tasks` alongside `agent_id`, `agent_type`
+and `agent_transcript_path`.
+
+What that capture does *not* show is a populated `background_tasks` on a
+`SubagentStop`: the agent ran in the foreground, so it was never registered as
+background work, and backgrounding one cannot be driven headlessly. So it is still
+unknown whether an agent appears in its own stop payload. The host excludes it by
+`id` rather than assuming, which is correct either way.
+
 **Present in the CLI binary but not yet seen firing**: `StopFailure`,
-`PostToolUseFailure`, `SubagentStop`, and the `notification_type` values
-`permission_prompt` and `agent_needs_input`.
+`PostToolUseFailure`, and the `notification_type` values `permission_prompt` and
+`agent_needs_input`.
 
 **Registered, triggered, and did not fire**: `PermissionDenied`. Denying a Bash
 command at the interactive prompt produced a `PermissionRequest` and nothing

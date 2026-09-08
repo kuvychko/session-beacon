@@ -23,6 +23,7 @@ from beacon_host.state import SessionStore, State
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 FIXTURES = FIXTURES_DIR / "hook_payloads.jsonl"
 BACKGROUND_STOP = FIXTURES_DIR / "stop_with_background_tasks.json"
+SUBAGENT_RUN = FIXTURES_DIR / "subagent_run.jsonl"
 
 
 def load() -> dict[str, dict]:
@@ -299,3 +300,91 @@ def test_permission_suggestions_carry_no_command_text(events):
     assert sug["behavior"] == "allow"
     assert sug["rules"][0]["toolName"] == "Bash"
     assert sug["rules"][0]["ruleContent"].startswith("<")
+
+
+# ---- a real session that spawned a subagent -------------------------------
+
+
+@pytest.fixture(scope="module")
+def subagent_run() -> list[dict]:
+    """One captured session, start to end, that used an Explore subagent.
+
+    Kept as a sequence rather than folded into hook_payloads.jsonl, which is
+    keyed one payload per event name: the order is the evidence here, and the
+    run contains two PostToolUse events that must stay distinguishable.
+    """
+    lines = SUBAGENT_RUN.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def test_subagent_events_carry_the_parents_session_id(subagent_run):
+    """The root cause, in captured form. Everything a subagent does arrives
+    under the session_id of the session that spawned it, so `agent_id` is the
+    only thing that separates the two."""
+    assert len({p["session_id"] for p in subagent_run}) == 1
+
+    tagged = [p for p in subagent_run if p.get("agent_id")]
+    assert {p["hook_event_name"] for p in tagged} == {
+        "SubagentStart", "PostToolUse", "PostToolBatch", "SubagentStop"}
+    assert len({p["agent_id"] for p in tagged}) == 1
+    assert all(p["agent_type"] == "Explore" for p in tagged)
+
+    # The parent's own events carry neither field, including the PostToolUse
+    # for the Agent call itself, which lands after the subagent has stopped.
+    parent = [p for p in subagent_run if not p.get("agent_id")]
+    assert all("agent_type" not in p for p in parent)
+    assert [p["tool_name"] for p in parent if p["hook_event_name"] == "PostToolUse"] \
+        == ["Agent"]
+
+
+def test_the_real_subagent_stop_carries_background_tasks(subagent_run):
+    """It is the same list Stop carries, which is what makes it a resync point.
+
+    Present and empty here: this agent ran in the foreground, so it was never
+    registered as background work. A populated one is still unobserved, which is
+    why SubagentStop excludes the agent it is reporting rather than trusting the
+    list to have dropped it already.
+    """
+    stop = next(p for p in subagent_run if p["hook_event_name"] == "SubagentStop")
+    assert stop["background_tasks"] == []
+    assert stop["agent_id"] and stop["agent_transcript_path"].startswith("<path>")
+
+
+def test_the_real_subagent_run_never_disturbs_a_waiting_row(subagent_run):
+    """The reported bug, replayed against real payloads.
+
+    The parent raises a permission prompt, and the subagent it launched earlier
+    goes on emitting tool calls under the parent's session_id. Every one of them
+    used to repaint the row WORKING, so a session genuinely blocked on a human
+    showed blue on the display -- the exact case the device exists for.
+    """
+    store = SessionStore()
+    sid = subagent_run[0]["session_id"]
+    cwd = subagent_run[0]["cwd"]
+    clock = iter(range(1, 100))
+
+    for payload in subagent_run:
+        if payload["hook_event_name"] == "SubagentStart":
+            # The parent blocks on a prompt of its own while the agent works.
+            store.apply_event({"hook_event_name": "PermissionRequest",
+                               "session_id": sid, "cwd": cwd,
+                               "tool_name": "Bash"}, next(clock))
+            assert store.sessions[sid].state == State.NEEDS_INPUT
+
+        store.apply_event(payload, next(clock))
+
+        if payload.get("agent_id"):
+            assert store.sessions[sid].state == State.NEEDS_INPUT, \
+                f"{payload['hook_event_name']} from a subagent cleared the row"
+        elif payload["hook_event_name"] == "PostToolUse":
+            # The parent's own PostToolUse, for the Agent call itself, is
+            # what finally answers the prompt -- and it arrives only once
+            # the subagent has stopped.
+            assert store.sessions[sid].state == State.WORKING
+
+    assert store.sessions[sid].state == State.ENDED
+
+
+def test_the_real_subagent_run_is_already_redacted(subagent_run):
+    for payload in subagent_run:
+        assert redact(payload) == payload

@@ -34,10 +34,19 @@ FORMAT_V = 1
 
 # Fields carried across a restart. `last_tool` is included because it costs
 # nothing; `error_type` because an ERROR row is meaningless without it.
+#
+# `attn_agent` is here because losing it is the subagent bug again across a
+# restart: a restored red row whose owner is forgotten reads as the main
+# thread's, and the first tool event from anywhere clears it.
+#
+# `bg_tasks`, `bg_seen` and `turn_over` are deliberately absent. Nothing tells
+# the daemon what happened to a subagent while it was down, and forgetting the
+# count errs towards letting an idle_prompt escalate, which is the direction
+# this state exists to protect.
 _FIELDS = (
     "session_id", "cwd", "label", "state_since", "last_event",
     "last_tool", "model", "cost_usd", "ctx_pct", "permission_mode",
-    "error_type",
+    "error_type", "attn_agent",
 )
 
 

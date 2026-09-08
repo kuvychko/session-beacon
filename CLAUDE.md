@@ -48,6 +48,20 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   no `PostToolUse`, and `PermissionDenied` fires only for auto-mode classifier
   denials; `PostToolBatch` is the only event that arrives when a human answers.
   Drop it and every rejected prompt leaves a red row until the next tool call.
+- `SubagentStop` is registered for the same reason `PostToolBatch` is: it is the
+  only event that recomputes `background_tasks` when a subagent ends. The count
+  was otherwise refreshed only by the parent's next `Stop`, which never arrives
+  if the parent has finished its turn and is waiting on the user, and a count
+  stuck above zero suppresses every `idle_prompt` after it. Drop it and a
+  session that used agents can sit blocked on you showing blue.
+- A hook event's `agent_id` is the only thing separating a subagent's events
+  from the parent's: they carry the parent's `session_id`. Never use
+  `agent_type` for this, whatever it looks like it means -- it is also set on
+  the main thread of a session started with `--agent`, without `agent_id`, so
+  filtering on it would ignore that session's every tool call. A tool event
+  clears an attention state only when its `agent_id` matches `attn_agent`, the
+  one that raised the prompt; it refreshes the staleness timer either way,
+  because a long subagent run is the only traffic its session produces.
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
 - A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.

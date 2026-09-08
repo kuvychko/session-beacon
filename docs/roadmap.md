@@ -75,7 +75,9 @@ friction fit in it and nothing fastens the two together.
 - Session history: how long each session spent waiting on you today. Would need a tiny SQLite store in the host.
 - Linux host support: only the hook command line and serial device path differ.
 - Hardware SPI and dirty-row rendering if flicker is noticeable.
-- Show `SubagentStop` activity or a subagent count.
+- Show a subagent count on the row. `SubagentStop` is now registered and the host
+  already tracks how many are outstanding, so this is a display question rather
+  than a data one.
 - Tray icon for the daemon with a "show log" and "quit" menu.
 - Second page or scroll for more than six sessions, driven by a button on the device.
 
