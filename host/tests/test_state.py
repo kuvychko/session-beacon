@@ -242,7 +242,8 @@ def test_real_asks_are_never_suppressed():
 def test_finished_background_tasks_do_not_count():
     st = SessionStore()
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "completed"}, {"id": "a2", "status": "failed"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "completed"},
+        {"id": "a2", "type": "subagent", "status": "failed"}]), 0)
     assert st.sessions["abc12345-0000"].state == State.IDLE
 
 
@@ -250,14 +251,14 @@ def test_a_task_with_no_status_counts_as_running():
     """The unknown case takes the quieter side: assuming a task had finished is
     what produces the false alarm."""
     st = SessionStore()
-    st.apply_event(ev("Stop", background_tasks=[{"id": "a1"}]), 0)
+    st.apply_event(ev("Stop", background_tasks=[{"id": "a1", "type": "subagent"}]), 0)
     assert st.sessions["abc12345-0000"].state == State.WORKING
 
 
 def test_a_new_prompt_forgets_the_previous_turns_tasks():
     st = SessionStore()
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "running"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
     st.apply_event(ev("UserPromptSubmit"), 1)
     assert st.sessions["abc12345-0000"].bg_tasks == 0
     st.apply_event(ev("Notification", notification_type="idle_prompt"), 2)
@@ -498,7 +499,7 @@ def test_subagent_stop_does_not_count_the_agent_it_is_reporting():
     stale count straight back."""
     st = SessionStore()
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "running"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
     st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[
         {"id": "a1", "type": "subagent", "status": "running"}]), 1)
     s = st.sessions["abc12345-0000"]
@@ -508,9 +509,10 @@ def test_subagent_stop_does_not_count_the_agent_it_is_reporting():
 def test_subagent_stop_leaves_the_row_alone_while_others_run():
     st = SessionStore()
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "running"}, {"id": "a2", "status": "running"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "running"},
+        {"id": "a2", "type": "subagent", "status": "running"}]), 0)
     st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[
-        {"id": "a2", "status": "running"}]), 1)
+        {"id": "a2", "type": "subagent", "status": "running"}]), 1)
     s = st.sessions["abc12345-0000"]
     assert s.bg_tasks == 1 and s.state == State.WORKING
 
@@ -520,7 +522,8 @@ def test_subagent_stop_without_background_tasks_decrements():
     as "nothing left running"."""
     st = SessionStore()
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "running"}, {"id": "a2", "status": "running"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "running"},
+        {"id": "a2", "type": "subagent", "status": "running"}]), 0)
     st.apply_event(ev("SubagentStop", agent_id="a1"), 1)
     assert st.sessions["abc12345-0000"].bg_tasks == 1
     st.apply_event(ev("SubagentStop", agent_id="a2"), 2)
@@ -544,15 +547,17 @@ def test_a_stale_background_count_stops_suppressing_idle_prompt():
     stale count swallowed every idle_prompt the session would ever send."""
     st = SessionStore(bg_quiet_s=180)
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "running"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
 
     # Inside the window the hold still applies: this is the false red it exists
     # to prevent.
     st.apply_event(ev("Notification", notification_type="idle_prompt"), 100)
+    st.tick(100)
     assert st.sessions["abc12345-0000"].state == State.WORKING
 
-    # Past it, with nothing having confirmed the count since, it escalates.
-    st.apply_event(ev("Notification", notification_type="idle_prompt"), 400)
+    # Past it, with nothing having confirmed the count since, it escalates --
+    # and now without needing a second notification to arrive.
+    st.tick(400)
     assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
 
 
@@ -561,8 +566,204 @@ def test_a_running_subagent_keeps_the_hold_alive():
     that the count is real, so a genuinely busy session is never escalated."""
     st = SessionStore(bg_quiet_s=180)
     st.apply_event(ev("Stop", background_tasks=[
-        {"id": "a1", "status": "running"}]), 0)
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
     for t in range(100, 600, 100):
         st.apply_event(ev("PostToolUse", tool_name="Read", agent_id="a1"), t)
     st.apply_event(ev("Notification", notification_type="idle_prompt"), 600)
     assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+# ---- what is in flight, and what is merely registered ---------------------
+#
+# `background_tasks` lists every kind of in-flight work, not just subagents.
+# Counting all of it is what let a session sit blue and then amber for as long
+# as it was left, having finished its turn eight minutes earlier.
+
+
+def test_an_armed_monitor_is_not_work_in_flight():
+    """The reported bug, in one test.
+
+    A session with two armed artifact comment monitors and no subagents at all
+    showed `work` for eight minutes and then `stale`, never red. A monitor is a
+    subscription registered for the life of the session, so the count could only
+    ever go up and the single idle_prompt Claude Code sent was swallowed.
+    """
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "s1a2b3c4d", "type": "monitor", "status": "running",
+         "description": "<str len=31>"},
+        {"id": "s5e6f7a8b", "type": "monitor", "status": "running",
+         "description": "<str len=27>"}]), 1)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.IDLE and s.bg_tasks == 0 and s.turn_over is False
+
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 2)
+    assert s.state == State.NEEDS_INPUT
+    st.tick(700)
+    assert s.state == State.WAITING
+
+
+def test_only_a_subagent_holds_a_session_back():
+    """Nothing reports the end of the other types, so counting one can only ever
+    mute the display. A subagent is retired by SubagentStop."""
+    for kind in ("monitor", "shell", "workflow", "MCP task", "teammate",
+                 "cloud session", "some-future-type"):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=[
+            {"id": "x1", "type": kind, "status": "running"}]), 0)
+        assert st.sessions["abc12345-0000"].state == State.IDLE, kind
+
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+def test_a_subagent_among_monitors_is_still_counted():
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "s1", "type": "monitor", "status": "running"},
+        {"id": "a1", "type": "subagent", "status": "running"},
+        {"id": "s2", "type": "monitor", "status": "running"}]), 0)
+    s = st.sessions["abc12345-0000"]
+    assert s.bg_tasks == 1 and s.state == State.WORKING
+
+
+def test_a_pending_subagent_counts():
+    """Claude Code lists in-flight work as `running` or `pending`; comparing
+    against "running" alone dropped a subagent that had not started yet."""
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "pending"}]), 0)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+# ---- a held idle_prompt is not a lost one ---------------------------------
+
+
+def test_a_held_idle_prompt_is_released_when_the_hold_expires():
+    """Claude Code sent exactly one idle_prompt for the idle period that turned
+    this up, so dropping it meant the row never went red however long it was
+    left. It is remembered instead, and tick() releases it."""
+    st = SessionStore(bg_quiet_s=180)
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 1)
+    s = st.sessions["abc12345-0000"]
+
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 176)
+    st.tick(176)
+    assert s.state == State.WORKING and s.idle_held
+
+    st.tick(182)
+    assert s.state == State.NEEDS_INPUT and not s.idle_held
+    assert s.bg_tasks == 0 and s.turn_over is False
+
+
+def test_the_notification_may_land_either_side_of_the_window():
+    """The three-second margin that made this a coin flip. Both orderings now
+    reach the same place, within a tick of each other."""
+    for at in (176.0, 184.0):
+        st = SessionStore(bg_quiet_s=180)
+        st.apply_event(ev("Stop", background_tasks=[
+            {"id": "a1", "type": "subagent", "status": "running"}]), 1)
+        st.apply_event(ev("Notification", notification_type="idle_prompt"), at)
+        st.tick(max(at, 182))
+        assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT, at
+
+
+def test_a_held_idle_prompt_is_released_the_moment_the_last_subagent_stops():
+    """It does not have to wait the window out when something retires the count
+    first."""
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+    st.tick(10)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WORKING
+
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[]), 20)
+    st.tick(20)
+    assert s.state == State.NEEDS_INPUT
+
+
+def test_a_held_idle_prompt_is_forgotten_when_the_session_gets_going_again():
+    """It describes a turn that has since been superseded."""
+    for name, extra in (("UserPromptSubmit", {}),
+                        ("PostToolUse", {"tool_name": "Bash"})):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=[
+            {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+        st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+        st.apply_event(ev(name, **extra), 20)
+        st.tick(1000)
+        assert st.sessions["abc12345-0000"].state != State.NEEDS_INPUT, name
+
+
+def test_a_subagents_tool_call_does_not_forget_a_held_idle_prompt():
+    """The parent's turn is over; the subagent working is the reason the
+    notification is being held in the first place."""
+    st = SessionStore(bg_quiet_s=180)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+    st.apply_event(ev("PostToolUse", tool_name="Grep", agent_id="a1"), 20)
+    st.tick(20)
+    s = st.sessions["abc12345-0000"]
+    assert s.idle_held and s.state == State.WORKING
+
+    # The agent goes quiet, the hold expires, and the notification lands.
+    st.tick(300)
+    assert s.state == State.NEEDS_INPUT
+
+
+def test_a_finished_turn_falls_to_idle_not_stale():
+    """`stale` is the worst answer available: amber sorts *below* `work`, so a
+    session waiting on you would be quieter than one being wrong about it."""
+    st = SessionStore(stale_after_s=100, bg_quiet_s=1000)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+    st.tick(200)
+    assert st.sessions["abc12345-0000"].state == State.IDLE
+
+    # A session that never ended its turn is still stale, as before.
+    st2 = SessionStore(stale_after_s=100)
+    st2.apply_event(ev("UserPromptSubmit"), 0)
+    st2.tick(200)
+    assert st2.sessions["abc12345-0000"].state == State.STALE
+
+
+def test_the_hold_expiring_does_not_disturb_a_session_mid_turn():
+    """turn_over is what makes the row IDLE. A count left over from a turn that
+    has since been superseded must not end the new one for it."""
+    st = SessionStore(bg_quiet_s=180)
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 1)
+    st.apply_event(ev("UserPromptSubmit"), 2)     # a new turn starts
+    st.tick(300)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+
+# ---- /health ---------------------------------------------------------------
+
+
+def test_background_report_names_the_session_being_held_back():
+    """None of this was visible from outside, and a row held behind a count
+    looks exactly like a session that is genuinely busy."""
+    st = SessionStore()
+    assert st.background_report(0) == []
+
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 100)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 110)
+    assert st.background_report(150) == [{
+        "id": "abc12345", "l": "session-beacon", "tasks": 1,
+        "turn_over": True, "idle_held": True, "bg_seen_age_s": 50.0,
+    }]
+
+    # And it goes quiet again once there is nothing outstanding.
+    st.tick(400)
+    assert st.background_report(400) == []

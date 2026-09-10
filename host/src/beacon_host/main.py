@@ -216,6 +216,12 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
                     # What is actually on the display. Answering "why does the
                     # screen say that" should not need a serial cable.
                     rows=[f"{r['l']}:{r['st']}:{r['age']}s" for r in snap["s"]],
+                    # Why a row is *not* red. A session held behind a background
+                    # count looks identical to one that is genuinely busy, and
+                    # working that out otherwise needs the state file and the
+                    # session's transcript. Empty unless something is
+                    # outstanding.
+                    bg=store.background_report(now),
                 )
                 # Tied to a real change rather than the once-a-second timer
                 # push, so a quiet desk does not rewrite the file all day.

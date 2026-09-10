@@ -173,6 +173,14 @@ def test_health_reports_event_count():
         with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
             h = json.loads(r.read())
         assert h["events_received"] == 17 and h["sessions"] == 2
+
+        # And the background bookkeeping, which is why a row is *not* red.
+        bg = [{"id": "835a20d6", "l": "inventory-servic", "tasks": 1,
+               "turn_over": True, "idle_held": True, "bg_seen_age_s": 183.0}]
+        hook_server.set_stats(sessions=1, events_received=18, bg=bg)
+        with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
+            h = json.loads(r.read())
+        assert h["bg"] == bg
     finally:
         hook_server.set_stats()
         srv.shutdown()

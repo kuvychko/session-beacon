@@ -80,12 +80,18 @@ class Session:
     # the main thread. A subagent's hook events carry the *parent's* session_id,
     # so without this a subagent's tool call answers a prompt it never saw.
     attn_agent: str = ""
-    # When background work was last confirmed by a payload. A running subagent
-    # emits hook events constantly, so silence means the count below is stale.
+    # When the background count was last confirmed by a payload. A running
+    # subagent emits hook events constantly, so silence means it is stale.
     bg_seen: float = 0.0
     # The turn ended while background work was still outstanding, so the session
     # is waiting on the machine and not yet on a person.
     turn_over: bool = False
+    # An `idle_prompt` that arrived while background work was outstanding. Held
+    # rather than dropped: Claude Code sent exactly *one* for the idle period
+    # that turned this up, so a swallowed notification is a row that never goes
+    # red at all. tick() releases it when the count retires.
+    idle_held: bool = False
+    idle_held_agent: str = ""
 
     def set_state(self, new: State, now: float) -> None:
         if new != self.state:
@@ -104,7 +110,7 @@ class SessionStore:
     need_red_s: float = 600.0
     ended_grace_s: float = 30.0
     # How long an outstanding background count is believed without fresh
-    # evidence. See the note on the idle_prompt branch in apply_event().
+    # evidence. See where it expires, in tick().
     bg_quiet_s: float = 180.0
     max_rows: int = 6
     label_overrides: dict[str, str] = field(default_factory=dict)
@@ -152,6 +158,7 @@ class SessionStore:
             s.error_type = ""
             s.bg_tasks = 0
             s.turn_over = False
+            s.idle_held = False
             s.set_state(State.WORKING, now)
         elif name in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
             # Activity. Only PostToolUse is registered by default; PreToolUse
@@ -185,29 +192,33 @@ class SessionStore:
             kind = ev.get("notification_type")
             if kind not in ATTENTION_NOTIFICATIONS:
                 s.last_event = now
-            elif (kind == "idle_prompt" and s.bg_tasks
-                  and now - s.bg_seen <= self.bg_quiet_s):
+            elif kind == "idle_prompt" and s.bg_tasks:
                 # `idle_prompt` only means Claude has been waiting a while,
                 # which is not the same as waiting on a human. The others in the
                 # set are direct asks -- a permission prompt raised inside a
                 # subagent still needs answering -- so only this one is held
                 # back, and only while background work is outstanding.
                 #
-                # `bg_seen` is what stops that hold becoming permanent. The
-                # count used to be recomputed only on the next Stop, and a turn
-                # that has already ended may never produce one, so a stale count
-                # swallowed every idle_prompt the session would ever send and
-                # the row silently never went red. A running subagent emits its
-                # own hook events constantly, each refreshing `bg_seen`, so
-                # silence this long means nothing is running.
+                # Held, not dropped. Dropping it assumed a later one would get
+                # through, and for the idle period that turned this up Claude
+                # Code sent exactly one: the row then never went red, whatever
+                # happened to the count afterwards. tick() owns the release, so
+                # there is no time arithmetic here and no window for the
+                # notification to fall the wrong side of.
+                s.idle_held, s.idle_held_agent = True, agent
                 s.last_event = now
             else:
                 self._want_attention(s, now, agent)
         elif name == "Stop":
-            # A turn that ends with a background agent still running has not
-            # handed anything back: the session is waiting on the machine, not
-            # on a person. Calling that IDLE let the next idle_prompt escalate
-            # it to a red row with nothing for anyone to do.
+            # A turn that ends with a subagent still running has not handed
+            # anything back: the session is waiting on the machine, not on a
+            # person. Calling that IDLE let the next idle_prompt escalate it to
+            # a red row with nothing for anyone to do.
+            #
+            # `bg_seen` is refreshed here because the payload is a freshly
+            # enumerated snapshot of the task registry, which is exactly what
+            # the field records. It is not a claim that the turn is still
+            # running.
             s.bg_tasks = running_background_tasks(ev)
             s.bg_seen = now
             s.turn_over = bool(s.bg_tasks)
@@ -266,7 +277,9 @@ class SessionStore:
         ignoring it outright would send an actively working parent to STALE.
         """
         if not agent:
-            s.turn_over = False
+            # The session is demonstrably going again, so a turn that had ended
+            # has not, and any notification held from it is out of date.
+            s.turn_over = s.idle_held = False
         if s.state in ATTENTION_STATES and agent != s.attn_agent:
             s.last_event = now
             return
@@ -287,6 +300,7 @@ class SessionStore:
         if s.state in ATTENTION_STATES:
             s.last_event = now
             return
+        s.idle_held = False
         # Remembered on entry only, for the same reason the rung is: this is the
         # ask that is outstanding, and a later notification does not replace it.
         s.attn_agent = agent
@@ -308,13 +322,36 @@ class SessionStore:
             self.rate_limits, self.rate_limits_at = rl, now
 
     def tick(self, now: float) -> None:
-        """Advance time: walk the attention ladder, mark stale, drop ended."""
+        """Advance time: retire background counts, walk the ladder, mark stale."""
         for sid in list(self.sessions):
             s = self.sessions[sid]
-            if s.state == State.ENDED and now - s.state_since > self.ended_grace_s:
-                del self.sessions[sid]
-            elif s.state == State.WORKING and now - s.last_event > self.stale_after_s:
-                s.set_state(State.STALE, now)
+            if s.state == State.ENDED:
+                if now - s.state_since > self.ended_grace_s:
+                    del self.sessions[sid]
+                continue
+
+            # The hold on a background count expires here, in one place, rather
+            # than inside the branch that happens to consult it. A count nothing
+            # has confirmed for this long is not evidence of anything: retiring
+            # it hands the row back and releases whatever it was suppressing.
+            if s.bg_tasks and now - s.bg_seen > self.bg_quiet_s:
+                s.bg_tasks = 0
+                if s.turn_over:
+                    s.turn_over = False
+                    if s.state == State.WORKING:
+                        # IDLE, not STALE. The turn ended, so this session is
+                        # waiting on a person; STALE is the worst answer
+                        # available because amber sorts *below* `work`.
+                        s.set_state(State.IDLE, now)
+            if s.idle_held and not s.bg_tasks:
+                s.idle_held = False
+                agent, s.idle_held_agent = s.idle_held_agent, ""
+                self._want_attention(s, now, agent)
+
+            if s.state == State.WORKING and now - s.last_event > self.stale_after_s:
+                # Same reasoning as above for a turn that ended and then went
+                # quiet without the count ever being retired.
+                s.set_state(State.IDLE if s.turn_over else State.STALE, now)
             # The ladder assigns `state` directly instead of calling set_state(),
             # which is the opposite of the STALE transition above and looks like
             # a bug until you see why: set_state() resets state_since, and that
@@ -352,6 +389,31 @@ class SessionStore:
         if self.rate_limits and now - self.rate_limits_at <= self.rate_limit_max_age_s:
             out["rl"] = dict(self.rate_limits)
         return out
+
+    def background_report(self, now: float) -> list[dict[str, Any]]:
+        """Per-session background bookkeeping, for /health. Not sent to the device.
+
+        None of this was visible from outside, and a session stuck blue behind a
+        background count looks exactly like a session that is genuinely busy.
+        Diagnosing that needed the persisted state file plus the session's own
+        transcript to work out which branch had run; it should be one curl, the
+        way `events_received` already is for missing hooks.
+
+        Only sessions with something outstanding appear, so a quiet desk reports
+        an empty list rather than a row per session saying nothing.
+        """
+        return [
+            {
+                "id": s.session_id[:8],
+                "l": s.label[:16],
+                "tasks": s.bg_tasks,
+                "turn_over": s.turn_over,
+                "idle_held": s.idle_held,
+                "bg_seen_age_s": round(now - s.bg_seen, 1) if s.bg_seen else None,
+            }
+            for s in self.sessions.values()
+            if s.bg_tasks or s.turn_over or s.idle_held
+        ]
 
     # ---- internals ----
 
@@ -436,18 +498,44 @@ def last_batch_tool(ev: dict[str, Any]) -> str:
     return ""
 
 
-def running_background_tasks(ev: dict[str, Any], exclude: str = "") -> int:
-    """How many background tasks a Stop payload reports as still running.
+# Task types that mean the session is waiting on the machine rather than on a
+# person. Only one qualifies, and the reason is that the beacon has machinery
+# for exactly one: `SubagentStop` retires a subagent, and a subagent's own hook
+# events carry an `agent_id` that refreshes `bg_seen`. Nothing reports the end
+# of any other type, so counting one can only ever mute the display.
+#
+# `monitor` is the type that forced this. An armed artifact comment monitor is
+# registered for as long as the session lives, so counting it meant a session
+# could never be shown as waiting on you again -- which is what happened.
+COUNTED_TASK_TYPES = frozenset({"subagent"})
 
-    Observed shape, captured from Claude Code 2.1.261:
+# Claude Code only lists in-flight work, and its own filter admits both of
+# these; `pending` was previously dropped because the check compared against
+# "running" alone.
+LIVE_STATUSES = frozenset({"running", "pending"})
+
+
+def running_background_tasks(ev: dict[str, Any], exclude: str = "") -> int:
+    """How many *subagents* a Stop payload reports as still in flight.
+
+    Shape, from a capture and from the CLI's own hook schema:
 
         "background_tasks": [{"id": "...", "type": "subagent",
                               "agent_type": "Explore", "status": "running",
                               "description": "..."}]
 
-    A task with no `status` counts as running. Assuming it had finished is the
-    mistake that produces the false alarm this exists to prevent, so the
-    unknown case takes the quieter side.
+    `type` is documented as a "friendly task-type label", one of `subagent`,
+    `shell`, `monitor`, `workflow`, `MCP task`, `teammate`, `cloud session`,
+    `dream` or `auto-mode scan`, falling back to the raw internal name for
+    anything newer. Only `subagent` is counted; see COUNTED_TASK_TYPES.
+
+    The two unknown cases deliberately break opposite ways. A task with no
+    `status` counts as running, because assuming it had finished produces the
+    false red this exists to prevent. A task with an unrecognised `type` is
+    ignored, because the failures are not symmetric: a wrongly ignored task
+    shows a red row that de-escalates in ten minutes and clears on the next tool
+    call, while a wrongly counted one that never ends silences the session for
+    good and says nothing about why.
 
     `exclude` drops the task whose `id` matches, which is how a SubagentStop
     avoids counting the very agent whose ending it is reporting.
@@ -457,7 +545,8 @@ def running_background_tasks(ev: dict[str, Any], exclude: str = "") -> int:
         return 0
     return sum(
         1 for t in tasks
-        if isinstance(t, dict) and t.get("status", "running") == "running"
+        if isinstance(t, dict) and t.get("type") in COUNTED_TASK_TYPES
+        and t.get("status", "running") in LIVE_STATUSES
         and not (exclude and t.get("id") == exclude)
     )
 

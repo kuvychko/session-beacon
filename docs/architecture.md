@@ -121,9 +121,11 @@ stateDiagram-v2
     NEEDS_INPUT --> WORKING: PostToolBatch / PostToolUse
     NEEDS_HELD --> WORKING: PostToolBatch / PostToolUse
     WAITING --> WORKING: PostToolBatch / PostToolUse
-    WORKING --> IDLE: Stop (no background tasks)
-    WORKING --> WORKING: Stop (background tasks running)
+    WORKING --> IDLE: Stop (no subagent running)
+    WORKING --> WORKING: Stop (a subagent still running)
     WORKING --> IDLE: SubagentStop (the last one, turn already over)
+    WORKING --> IDLE: the background count expires, turn already over
+    IDLE --> NEEDS_INPUT: a held idle_prompt is released
     WORKING --> ERROR: StopFailure
     WORKING --> STALE: no event for stale_after_s
     STALE --> WORKING: PostToolUse / UserPromptSubmit
@@ -156,17 +158,48 @@ State semantics:
 
 `Stop` means the turn ended, not that a human is needed: it carries `background_tasks`, and a turn that ends with a subagent still running stays `WORKING`. Calling it `IDLE` let the next `idle_prompt` paint a red row with nothing to act on. See [claude-code-integration.md](claude-code-integration.md#hook-events-we-register).
 
+**Only a subagent counts.** `background_tasks` is every kind of in-flight work the
+session has registered — `subagent`, `shell`, `monitor`, `workflow`, `MCP task`,
+`teammate`, `cloud session` — and reading it as "subagents still running" cost a
+session eight minutes of blue followed by amber while it sat waiting on a human. It
+had no subagents at all. It had two armed artifact comment monitors, which register
+as `monitor` tasks for the life of the session.
+
+The reason only `subagent` counts is not that the others are less real. It is that
+the beacon has machinery for exactly one of them: `SubagentStop` retires a subagent,
+and a subagent's own hook events refresh the freshness stamp. Nothing announces the
+end of any other type, so counting one is a guess that can only mute the display,
+and a `monitor` never ends at all — the count could only ever go up, and a session
+that had used the artifact tooling could never be shown as waiting on you again.
+An unrecognised `type` is ignored for the same reason: a wrongly ignored task shows
+a red row that de-escalates in ten minutes and clears on the next tool call, while a
+wrongly counted one that never ends silences the session for good.
+
 **That count has to be able to come back down.** It used to be recomputed only on
 the next `Stop` or `UserPromptSubmit`, and a turn that has already ended and is
 waiting on you produces neither -- so a count left positive suppressed every
 `idle_prompt` the session would ever send, and the row stayed blue however long you
 left it. `SubagentStop` is registered for exactly this: it fires when a subagent
 ends, carries a fresh `background_tasks`, and drops the row to `IDLE` when it was
-the last of them and the turn was already over. The hold also expires on its own
-after `bg_quiet_s` (default 180 s) without anything confirming the count, which is
-the backstop if that event is ever missed. A running subagent refreshes it
-constantly with its own hook events, so a genuinely busy session is never
-escalated.
+the last of them and the turn was already over.
+
+**And the hold expires in `tick()`, in one place.** A count nothing has confirmed
+for `bg_quiet_s` (default 180 s) is retired outright: the row hands back to `IDLE`
+if its turn was already over, and whatever the count was suppressing is released. A
+running subagent refreshes the stamp constantly with its own hook events, so a
+genuinely busy session is never escalated. Doing this in `tick()` rather than inside
+the branch that consults the count is what makes `IDLE` reachable at all — the
+alternative was the row sitting on `WORKING` until the staleness timer turned it
+amber, which is the worst answer available, because `stale` sorts *below* `work`.
+
+**A held `idle_prompt` is not a lost one.** It used to be dropped, on the assumption
+that a later one would get through. Claude Code sends them "after Claude has been
+waiting a while", which sounds like a repeat and is not a promise of one: for the
+idle period that turned this up it sent exactly one, 183 seconds after the turn
+ended, against a 180-second hold that had re-armed itself at the `Stop`. Three
+seconds decided whether the row was ever red. It is now remembered on the session
+and delivered when the hold expires or the count retires, so which side of the
+window it lands on no longer matters and nothing depends on a second one arriving.
 
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
 
@@ -268,7 +301,7 @@ Nothing tells the daemon that a window was closed while it was down, because `Se
 
 Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
 
-Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s`, `uptime_s` and `rows`, which is what is currently on the display. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. A tray icon is a possible later addition, not phase 1.
+Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s`, `uptime_s`, `rows`, which is what is currently on the display, and `bg`, which is why a row is *not* red. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. `bg` does the same job for the other silent failure: a row held behind a background count looks exactly like a session that is genuinely busy, and working out which needed the persisted state file plus the session's own transcript. It carries the outstanding count, whether the turn had ended, whether an `idle_prompt` is being held, and how long ago the count was last confirmed — and it is empty unless a session has something outstanding. A tray icon is a possible later addition, not phase 1.
 
 ## Firmware internals
 

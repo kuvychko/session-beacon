@@ -187,6 +187,45 @@ def test_redact_strips_a_batch_of_command_lines_and_output():
     assert call["tool_response"] == "<str len=37>"
 
 
+def test_redact_strips_a_shell_tasks_command_line():
+    """`background_tasks` is not only subagents. A task of type `shell` carries
+    the command line it is running, up to a thousand characters of it, one level
+    below the top-level names CONTENT_FIELDS already covers -- the same leak
+    `ruleContent` was. The committed fixtures have no shell task, so nothing
+    caught this until the type vocabulary was checked against the CLI's schema.
+    """
+    raw = {"hook_event_name": "Stop", "session_id": "s", "cwd": "C:/x",
+           "background_tasks": [
+               {"id": "b1a2", "type": "shell", "status": "running",
+                "command": "npm run dev -- --port 3000",
+                "description": "dev server"},
+               {"id": "s1a2", "type": "monitor", "status": "running",
+                "server": "artifacts", "tool": "watch",
+                "description": "Cursor Rollout Stocktake"}]}
+    tasks = redact(raw)["background_tasks"]
+    # The shape the state machine reads survives; the free text does not.
+    assert [t["type"] for t in tasks] == ["shell", "monitor"]
+    assert [t["status"] for t in tasks] == ["running", "running"]
+    assert tasks[0]["command"] == "<str len=26>"
+    assert tasks[0]["description"] == "<str len=10>"
+    assert tasks[1]["server"] == "artifacts" and tasks[1]["tool"] == "watch"
+    assert tasks[1]["description"] == "<str len=24>"
+
+
+def test_redact_strips_a_session_crons_prompt():
+    """`session_crons` rides on the same events as `background_tasks` and holds
+    the text of a /loop, a CronCreate or a ScheduleWakeup. `prompt` was already
+    named in CONTENT_FIELDS, but that only covers the top level, so the list
+    went through untouched. Every committed fixture has it empty."""
+    raw = {"hook_event_name": "Stop", "session_id": "s", "cwd": "C:/x",
+           "session_crons": [{"id": "c1", "schedule": "*/5 * * * *",
+                              "recurring": True,
+                              "prompt": "check the deploy and report back"}]}
+    cron = redact(raw)["session_crons"][0]
+    assert cron["schedule"] == "*/5 * * * *" and cron["recurring"] is True
+    assert cron["prompt"] == "<str len=32>"
+
+
 def test_redact_is_idempotent(events):
     """Re-redacting a fixture must not corrupt it, so fixtures can be refreshed
     from a capture file without special-casing."""

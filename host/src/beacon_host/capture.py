@@ -53,8 +53,10 @@ def _marker(v: Any) -> str:
 # Free text that appears *inside* a structured field rather than at the top
 # level. `description` names a background task; `ruleContent` is the permission
 # rule Claude Code offers to add, which is built from the command line and so
-# echoes the very thing redacting `tool_input` is meant to strip.
-NESTED_CONTENT_KEYS = frozenset({"description", "ruleContent"})
+# echoes the very thing redacting `tool_input` is meant to strip. `command` is
+# the same leak once more: a background task of type `shell` carries the whole
+# command line, up to a thousand characters of it.
+NESTED_CONTENT_KEYS = frozenset({"description", "ruleContent", "command"})
 
 # Top-level fields holding structured data with free text somewhere inside.
 # Their shape is worth keeping: `status` tells a running background task from a
@@ -64,7 +66,12 @@ NESTED_CONTENT_KEYS = frozenset({"description", "ruleContent"})
 # the three: every entry nests a `tool_input` and a `tool_response`, so the
 # command line and its output sit one level below the top-level names that
 # CONTENT_FIELDS already covers.
-STRUCTURED_FIELDS = frozenset({"background_tasks", "permission_suggestions", "tool_calls"})
+# `session_crons` rides on the same events as `background_tasks` and carries a
+# `prompt` per entry -- the text of a /loop, a CronCreate or a ScheduleWakeup.
+# `prompt` is already named in CONTENT_FIELDS, but that only covers the top
+# level, so without this the list went through untouched.
+STRUCTURED_FIELDS = frozenset({
+    "background_tasks", "permission_suggestions", "tool_calls", "session_crons"})
 
 
 def _redact_nested(v: Any) -> Any:

@@ -48,6 +48,18 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   no `PostToolUse`, and `PermissionDenied` fires only for auto-mode classifier
   denials; `PostToolBatch` is the only event that arrives when a human answers.
   Drop it and every rejected prompt leaves a red row until the next tool call.
+- `running_background_tasks()` counts `type == "subagent"` and nothing else.
+  `background_tasks` also carries `shell`, `monitor`, `workflow`, `MCP task`,
+  `teammate` and `cloud session` entries, and an armed artifact comment monitor
+  is a `monitor` registered for the life of the session. Counting those is what
+  made a session that had finished its turn show blue for eight minutes and then
+  amber, never red: only a subagent can be retired (`SubagentStop`) or confirmed
+  alive (its own `agent_id` events), so counting anything else can only mute the
+  display, and a monitor never ends. An unknown `type` is ignored for the same
+  reason. Do not "generalise" this back to counting every entry.
+- A held `idle_prompt` is remembered on the session, never dropped. Claude Code
+  sent exactly one for the idle period that turned this up, so dropping it meant
+  the row never went red. `tick()` releases it when the count retires.
 - `SubagentStop` is registered for the same reason `PostToolBatch` is: it is the
   only event that recomputes `background_tasks` when a subagent ends. The count
   was otherwise refreshed only by the parent's next `Stop`, which never arrives

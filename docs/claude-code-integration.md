@@ -48,7 +48,7 @@ Two of these are more useful than they first look:
 | `PermissionRequest` | Claude Code needs permission for a tool | `NEEDS_INPUT`, if not already waiting |
 | `PermissionDenied` | The auto-mode classifier denied a call, not a person; see below | `WORKING`, the prompt was answered |
 | `Notification` | Claude Code wants attention, carries `notification_type` | `NEEDS_INPUT` for the attention types below, if not already waiting |
-| `Stop` | Claude finished its turn, carries `background_tasks` | `IDLE`, or `WORKING` if background work is still running |
+| `Stop` | Claude finished its turn, carries `background_tasks` | `IDLE`, or `WORKING` if a subagent is still running |
 | `SubagentStop` | A subagent ended, carries `agent_id` and a fresh `background_tasks` | Recomputes the count; `IDLE` if that was the last of it and the turn had ended |
 | `StopFailure` | The turn ended on an API error, carries `error_type` | `ERROR` |
 | `SessionEnd` | Session closes | `ENDED` |
@@ -106,8 +106,8 @@ Observed shape:
 
 Treating that as `IDLE` produced a real false alarm: the session went green, the
 next `idle_prompt` escalated it to a pulsing red row, and there was nothing for
-anyone to do. A session with running tasks is `WORKING` instead, and `idle_prompt`
-is held back while any are outstanding.
+anyone to do. A session with a running subagent is `WORKING` instead, and
+`idle_prompt` is held back while one is outstanding.
 
 Only `idle_prompt` is held back. It means no more than "Claude has been waiting a
 while", which is not the same as waiting on a person. The other attention types
@@ -115,6 +115,52 @@ are direct asks — a permission prompt raised inside a subagent still needs
 answering — so they escalate regardless. A task with no `status` counts as
 running, because assuming it had finished is exactly the mistake that produces
 the false alarm.
+
+### `background_tasks` is not only subagents
+
+The captured payload above is a subagent, and reading the field as "subagents
+still running" cost a session eight minutes of blue followed by amber when it had
+been waiting on a human the whole time. It had no subagents at all. It had two
+armed artifact comment monitors.
+
+The list is every kind of in-flight work the session has registered. `type` is
+documented in the CLI's own hook schema as a *"friendly task-type label (e.g.
+'shell', 'subagent', 'monitor', 'workflow'). Falls back to the raw discriminant
+for unknown types."* The full map in 2.1.267 is:
+
+| `type` | What it is |
+|--------|------------|
+| `subagent` | A backgrounded `Agent` call |
+| `shell` | A `run_in_background` command |
+| `monitor` | An MCP or websocket watch — **an armed artifact comment monitor is one of these** |
+| `workflow` | A background dynamic workflow |
+| `MCP task` | A backgrounded MCP tool call |
+| `teammate` | An in-process teammate |
+| `cloud session` | A remote agent |
+| `dream`, `auto-mode scan` | Internal background work |
+
+`status` is `running` or `pending`; the list is pre-filtered to work that is
+actually in flight, so a finished task never appears in it.
+
+**Only `subagent` is counted**, and the reason is not that the others are less
+real. It is that the beacon has machinery for exactly one of them: `SubagentStop`
+retires a subagent, and a subagent's own hook events carry an `agent_id` that
+refreshes the freshness stamp. Nothing announces the end of any other type, so
+counting one is a guess that can only ever mute the display — and a `monitor`
+never ends at all. That is the failure that was observed: the count could only go
+up, and a session that had used the artifact tooling could never be shown as
+waiting on you again for the rest of its life.
+
+The two unknown cases therefore break in opposite directions, deliberately. An
+unrecognised `status` counts as running, because assuming a task had finished is
+what produces a false red. An unrecognised `type` is ignored, because the failures
+are not symmetric: a wrongly ignored task shows a red row that de-escalates in ten
+minutes and clears on the next tool call, while a wrongly counted one that never
+ends silences the session for good and says nothing about why.
+
+`Stop` and `SubagentStop` also carry `session_crons` — the `/loop`, `CronCreate`
+and `ScheduleWakeup` entries that will wake the session later. Nothing reads it
+yet. It is redacted at capture time because each entry carries the prompt text.
 
 **Two things used to break this, and both are fixed.** They are worth spelling out
 because between them a session blocked on a human could show `WORKING` for as long
@@ -134,9 +180,19 @@ ignoring the events outright would send an actively working parent to `STALE`.
 `UserPromptSubmit`. A turn that has already ended and is waiting on you produces
 neither, so a count left positive suppressed every `idle_prompt` the session would
 ever send and the row never went red at all. `SubagentStop` now recomputes it the
-moment a subagent ends. As a backstop the hold also expires: `idle_prompt` is only
-held while something has confirmed the count within `bg_quiet_s` (default 180 s),
-and a running subagent refreshes that constantly with its own events.
+moment a subagent ends. As a backstop the hold also expires: a count nothing has
+confirmed within `bg_quiet_s` (default 180 s) is retired outright, and a running
+subagent refreshes that constantly with its own events.
+
+*A held `idle_prompt` used to be a lost one.* Dropping it assumed a later one
+would get through. Claude Code sends them "after Claude has been waiting a while",
+which sounds like a repeat and is not a promise of one: for the idle period that
+turned this up it sent **exactly one**, 183 seconds after the turn ended, against
+a 180-second hold that had re-armed itself at the `Stop`. Three seconds, and the
+row's whole behaviour on either side of them. A held notification is now
+remembered on the session and delivered when the hold expires or the count
+retires, so it no longer matters which side of the window it lands on, and nothing
+depends on a second one arriving.
 
 **A repeat notification does not restart the alarm.** `idle_prompt` fires again and again while nobody answers, so a session already on the attention ladder only has its activity timer refreshed; the rung it has reached is left alone. Without that the display would re-arm the pulse every few minutes and a parked session would blink indefinitely, which is what it used to do. See [the attention ladder](architecture.md#the-attention-ladder).
 
@@ -245,7 +301,7 @@ Windows notes:
 
 ## How much of this is verified
 
-Three different levels, and the difference matters.
+Four different levels, and the difference matters.
 
 **Observed on this machine**, captured by running the daemon with `--capture` against
 Claude Code 2.1.261 and saved to `host/tests/fixtures/hook_payloads.jsonl`:
@@ -280,6 +336,16 @@ What that capture does *not* show is a populated `background_tasks` on a
 background work, and backgrounding one cannot be driven headlessly. So it is still
 unknown whether an agent appears in its own stop payload. The host excludes it by
 `id` rather than assuming, which is correct either way.
+
+**Read out of the CLI binary rather than observed**: the `background_tasks`
+type vocabulary in the table above, and the schema line that documents `type` as
+a friendly label falling back to the raw internal name. The binary carries the
+hook schemas and the task registry's own internal-to-friendly map, which is what
+identifies an armed artifact comment monitor as a `monitor_ws` task reaching a
+hook as `type: "monitor"` — the binary's own summary string for that family is
+"1 Artifact comment monitor". This is a level below a capture and a level above
+the published docs, which do not describe the field at all. What would settle it
+is one `--capture` on a session with an armed monitor.
 
 **Present in the CLI binary but not yet seen firing**: `StopFailure`,
 `PostToolUseFailure`, and the `notification_type` values `permission_prompt` and
@@ -340,13 +406,17 @@ Conversation content is stripped as it is written. Prompts, tool arguments, tool
 responses and assistant messages become markers like `<str len=22>`, and every path
 except `cwd` is reduced to its last segment because the others carry a username.
 
-Three fields hide free text *inside* a structure rather than at the top level,
+Four fields hide free text *inside* a structure rather than at the top level,
 and all are walked recursively: `permission_suggestions`, whose `ruleContent` is
 derived from the command line; `background_tasks`, whose `description` names a
-running agent; and `tool_calls`, which is the whole of a `PostToolBatch` payload
+running task and whose `command` is the full command line of a `shell` one;
+`session_crons`, whose `prompt` is the text of a `/loop` or a scheduled wake-up;
+and `tool_calls`, which is the whole of a `PostToolBatch` payload
 and nests a `tool_input` and a `tool_response` per call — the command line and
-its output, one level below the top-level names that were already covered. Their
-shape survives — a task's `status`, a suggestion's `behavior` and `toolName`, a
+its output, one level below the top-level names that were already covered. The
+last two were added after the type vocabulary above turned up what else those
+lists can carry; every committed fixture happens to have an empty `session_crons`
+and no `shell` task, so the guard had never seen either. Their shape survives — a task's `status`, a suggestion's `behavior` and `toolName`, a
 call's `tool_name` — because that is what the state machine and the tests read.
 Field names and shapes survive, which is all a fixture needs. A test asserts the
 committed fixtures contain no usernames or unredacted text.

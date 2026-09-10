@@ -43,10 +43,16 @@ FORMAT_V = 1
 # the daemon what happened to a subagent while it was down, and forgetting the
 # count errs towards letting an idle_prompt escalate, which is the direction
 # this state exists to protect.
+#
+# `idle_held` is here for that same reason, read the other way round. It is a
+# notification the session has already sent and nobody has answered, and Claude
+# Code may never send another. Restoring it alongside a forgotten count means
+# the first tick() releases it and the row goes red -- which is true: the
+# session is waiting on you, and it was waiting before the restart.
 _FIELDS = (
     "session_id", "cwd", "label", "state_since", "last_event",
     "last_tool", "model", "cost_usd", "ctx_pct", "permission_mode",
-    "error_type", "attn_agent",
+    "error_type", "attn_agent", "idle_held", "idle_held_agent",
 )
 
 
