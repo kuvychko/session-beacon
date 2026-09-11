@@ -34,6 +34,25 @@ def test_round_trip_keeps_the_ladder_rung_and_the_clock(tmp_path):
     assert b.snapshot(1000 + 3 * 3600)["s"][0]["age"] == 3 * 3600
 
 
+def test_a_look_row_survives_and_still_graduates(tmp_path):
+    """The untracked-work count is not restored, but the row and its clock are,
+    so the graduation timer carries on from where it was."""
+    p = tmp_path / "sessions.json"
+    a = SessionStore()
+    a.apply_event(ev("Stop", "o", background_tasks=[
+        {"id": "w1", "type": "workflow", "status": "running"}]), 0)
+    a.apply_event(ev("Notification", "o", notification_type="idle_prompt"), 10)
+    persist.save(p, a, 100)
+
+    b = SessionStore(look_s=300)
+    assert persist.load(p, b, 100, 86400.0) == 1
+    assert b.sessions["o"].state == State.NEEDS_LOOK
+    b.tick(200)
+    assert b.sessions["o"].state == State.NEEDS_LOOK
+    b.tick(311)
+    assert b.sessions["o"].state == State.NEEDS_INPUT
+
+
 def test_statusline_figures_survive(tmp_path):
     p = tmp_path / "sessions.json"
     a = SessionStore()

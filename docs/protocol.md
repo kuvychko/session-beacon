@@ -36,9 +36,9 @@ Session object:
 | Field | Type | Meaning |
 |-------|------|---------|
 | `id` | string | First 8 chars of `session_id`. The device stores it and does not currently use it; rows are matched by position. Useful when reading a snapshot on a serial monitor. |
-| `l` | string | Label, max 16 chars, truncated by host. |
-| `st` | string | `start`, `work`, `need`, `held`, `wait`, `err`, `idle`, `stale`, `end`. Drives the row's dot colour. `need` and `held` fill the whole row; only `need` pulses. |
-| `age` | int | Seconds in current state. Across `need`, `held` and `wait` it keeps running rather than restarting at each rung, so it is the whole time the session has been waiting on a human. |
+| `l` | string | Label, max 16 chars. The host shortens longer ones from the middle, keeping 9 chars from the start and 5 from the end around `..` (`inventory-service2` becomes `inventory..vice2`), because clones of one repo usually differ only in a suffix. |
+| `st` | string | `start`, `work`, `need`, `held`, `look`, `wait`, `err`, `idle`, `stale`, `end`. Drives the row's dot colour. `need` and `held` fill the whole row; only `need` pulses. |
+| `age` | int | Seconds in current state. Across `need`, `held` and `wait` it keeps running rather than restarting at each rung, so it is the whole time the session has been waiting on a human. A `look` row that graduates to `need` starts again at zero, because time spent in `look` was not time spent waiting on a human. |
 | `ctx` | int | Context window used, percent. Optional. |
 | `m` | string | Model short name, max 8 chars. Optional. Shown only for the featured session. |
 | `tool` | string | Last tool name, max 10 chars. Optional. The host sends it whenever it knows one; the device does not read it yet, because a row has no space for it. See [roadmap.md](roadmap.md). |
@@ -79,6 +79,6 @@ These exist because a quiet host and a device that is dropping or failing to par
 
 - Lines longer than 1024 bytes are discarded by the device, including the remainder after the overflow, and counted in the heartbeat's `drop`.
 - Unknown fields are ignored on both sides. Add fields freely; bump `v` only for breaking changes.
-- A new `st` value is not a breaking change. The device falls back to `start`'s grey for anything it does not recognise, so an old device driven by a new host renders the new state plainly rather than failing. `held` and `wait` were added this way: bumping `v` for them would have replaced a grey dot with a full-screen `protocol` error on every device not yet reflashed, which is the worse outcome by a wide margin. Bump `v` when the device would otherwise draw something *wrong*, not merely something dull.
+- A new `st` value is not a breaking change. The device falls back to `start`'s grey for anything it does not recognise, so an old device driven by a new host renders the new state plainly rather than failing. `held`, `wait` and `look` were added this way: bumping `v` for them would have replaced a grey dot with a full-screen `protocol` error on every device not yet reflashed, which is the worse outcome by a wide margin. Bump `v` when the device would otherwise draw something *wrong*, not merely something dull.
 - The device shows a "no host" screen after 10 s without any message.
 - No ACKs. A corrupted line is fixed by the next snapshot.

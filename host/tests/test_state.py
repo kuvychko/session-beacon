@@ -1,6 +1,6 @@
 """State machine tests. Payload shapes are provisional until fixtures are captured."""
 
-from beacon_host.state import SessionStore, State
+from beacon_host.state import SessionStore, State, elide_label
 
 
 def ev(name: str, sid: str = "abc12345-0000", cwd: str = "C:\\Repos\\session-beacon", **extra):
@@ -760,10 +760,184 @@ def test_background_report_names_the_session_being_held_back():
         {"id": "a1", "type": "subagent", "status": "running"}]), 100)
     st.apply_event(ev("Notification", notification_type="idle_prompt"), 110)
     assert st.background_report(150) == [{
-        "id": "abc12345", "l": "session-beacon", "tasks": 1,
+        "id": "abc12345", "l": "session-beacon", "tasks": 1, "other": 0,
         "turn_over": True, "idle_held": True, "bg_seen_age_s": 50.0,
     }]
 
     # And it goes quiet again once there is nothing outstanding.
     st.tick(400)
     assert st.background_report(400) == []
+
+
+def test_background_report_shows_untracked_work_and_elides_the_label():
+    st = SessionStore()
+    st.apply_event(ev("Stop", cwd="C:/nowhere/inventory-service2", background_tasks=[
+        {"id": "w1", "type": "workflow", "status": "running"}]), 100)
+    [row] = st.background_report(100)
+    assert row["other"] == 1 and row["tasks"] == 0
+    assert row["l"] == "inventory..vice2"
+
+
+# ---- NEEDS_LOOK: an idle_prompt with untracked work still in flight -------
+#
+# An orchestrator waiting on a `workflow` task went filled red and pulsing,
+# the treatment a permission prompt gets, with nothing blocked at all. The
+# subagent count cannot widen to cover it (that is the monitor bug), so a
+# second signal softens the notification instead, and a timer backs it up.
+
+WORKFLOW = [{"id": "w1", "type": "workflow", "status": "running"}]
+
+
+def test_an_orchestrator_waiting_on_a_workflow_is_not_red():
+    """The incident, in one test."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=WORKFLOW), 1)
+    s = st.sessions["abc12345-0000"]
+    # The WORKING/IDLE decision is untouched: only a subagent keeps a row busy.
+    assert s.state == State.IDLE and s.bg_tasks == 0 and s.bg_other == 1
+
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 60)
+    st.tick(60)
+    assert s.state == State.NEEDS_LOOK
+    assert st.snapshot(60)["s"][0]["st"] == "look"
+
+
+def test_look_graduates_onto_the_ladder_and_starts_it_fresh():
+    """Nothing reports that a workflow ended, so the soft row cannot wait for
+    proof. Left alone it lands where an unsoftened idle_prompt would have."""
+    st = SessionStore(look_s=300, need_pulse_s=120, need_red_s=600)
+    st.apply_event(ev("Stop", background_tasks=WORKFLOW), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+    s = st.sessions["abc12345-0000"]
+
+    st.tick(300)
+    assert s.state == State.NEEDS_LOOK
+    st.tick(311)
+    assert s.state == State.NEEDS_INPUT
+    assert st.snapshot(311)["s"][0]["age"] == 0
+
+    # The ladder then runs its full length from the graduation, not from the
+    # notification.
+    st.tick(311 + 100)
+    assert s.state == State.NEEDS_INPUT
+    st.tick(311 + 121)
+    assert s.state == State.NEEDS_HELD
+
+
+def test_a_repeat_idle_prompt_does_not_restart_the_look_timer():
+    """A timer that restarts on every notification never runs out."""
+    st = SessionStore(look_s=300)
+    st.apply_event(ev("Stop", background_tasks=WORKFLOW), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 250)
+    st.tick(311)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_look_clears_when_the_session_picks_up_again():
+    for name, extra in (("PostToolUse", {"tool_name": "Bash"}),
+                        ("PostToolBatch", {}),
+                        ("UserPromptSubmit", {}),
+                        ("Stop", {})):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=WORKFLOW), 0)
+        st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+        st.apply_event(ev(name, **extra), 20)
+        s = st.sessions["abc12345-0000"]
+        assert s.state in (State.WORKING, State.IDLE), name
+        st.tick(1000)
+        assert s.state not in (State.NEEDS_INPUT, State.NEEDS_HELD), name
+
+
+def test_a_direct_ask_is_as_urgent_as_ever_with_a_workflow_running():
+    """Only idle_prompt is softened. A permission prompt needs answering now,
+    whatever else is going on, including from a row that is already cyan."""
+    for name, extra in (("PermissionRequest", {"tool_name": "Bash"}),
+                        ("Notification", {"notification_type": "permission_prompt"}),
+                        ("Notification", {"notification_type": "elicitation_dialog"})):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=WORKFLOW), 0)
+        st.apply_event(ev(name, **extra), 5)
+        assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT, name
+
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=WORKFLOW), 0)
+        st.apply_event(ev("Notification", notification_type="idle_prompt"), 5)
+        st.apply_event(ev(name, **extra), 6)
+        assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT, name
+
+
+def test_work_that_never_ends_does_not_soften():
+    """A monitor is a subscription for the life of the session; `dream` and
+    `auto-mode scan` are Claude Code's own housekeeping. Softening on them would
+    delay every alarm the session ever raises."""
+    for kind in ("monitor", "dream", "auto-mode scan"):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=[
+            {"id": "x1", "type": kind, "status": "running"}]), 0)
+        st.apply_event(ev("Notification", notification_type="idle_prompt"), 5)
+        assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT, kind
+
+
+def test_untracked_work_of_any_other_kind_softens():
+    """Unknown types count here, unlike in the subagent count, because a wrong
+    guess costs at most look_s."""
+    for kind in ("workflow", "shell", "MCP task", "teammate", "cloud session",
+                 "some-future-type"):
+        st = SessionStore()
+        st.apply_event(ev("Stop", background_tasks=[
+            {"id": "x1", "type": kind, "status": "pending"}]), 0)
+        st.apply_event(ev("Notification", notification_type="idle_prompt"), 5)
+        assert st.sessions["abc12345-0000"].state == State.NEEDS_LOOK, kind
+
+
+def test_a_held_idle_prompt_released_with_a_workflow_left_goes_to_look():
+    """A subagent can retire while a workflow is still listed. The released
+    notification goes through the same severity check as a fresh one."""
+    st = SessionStore()
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}, *WORKFLOW]), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 10)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WORKING and s.idle_held
+
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=WORKFLOW), 20)
+    st.tick(20)
+    assert s.state == State.NEEDS_LOOK
+
+
+def test_look_sorts_above_work_and_below_err():
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit", sid="w"), 0)
+    st.apply_event(ev("Stop", sid="l", background_tasks=WORKFLOW), 0)
+    st.apply_event(ev("Notification", sid="l", notification_type="idle_prompt"), 1)
+    st.apply_event(ev("StopFailure", sid="e", error_type="rate_limit"), 2)
+    assert [r["st"] for r in st.snapshot(3)["s"]] == ["err", "look", "work"]
+
+
+# ---- labels are elided in the middle ---------------------------------------
+
+
+def test_elide_label_keeps_both_ends():
+    assert elide_label("homelab") == "homelab"
+    assert elide_label("sixteen-chars-ok") == "sixteen-chars-ok"
+    out = elide_label("inventory-service2")
+    assert out == "inventory..vice2" and len(out) == 16
+    assert len(elide_label("x" * 17)) == 16
+
+
+def test_clones_with_a_long_shared_prefix_stay_distinguishable():
+    """A prefix cut showed all three as the same sixteen characters."""
+    clones = ("averylongprojectname", "averylongprojectname2", "averylongprojectname3")
+    st = SessionStore()
+    for i, name in enumerate(clones):
+        st.apply_event(ev("UserPromptSubmit", sid=str(i), cwd=f"C:/nowhere/{name}"), i)
+    labels = [r["l"] for r in st.snapshot(5)["s"]]
+    assert len(set(labels)) == 3 and all(len(label) == 16 for label in labels)
+
+
+def test_a_long_override_is_elided_too():
+    st = SessionStore(label_overrides={"C:/nowhere/x": "an-override-that-is-long"})
+    st.apply_event(ev("UserPromptSubmit", cwd="C:/nowhere/x"), 0)
+    assert st.snapshot(1)["s"][0]["l"] == "an-overri..-long"

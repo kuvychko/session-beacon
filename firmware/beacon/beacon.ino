@@ -136,6 +136,11 @@ static constexpr int16_t BAR_W    = 44;
 // tell them apart; only the pixels converge. Do not split this into a colour of
 // its own without a reason the display itself can show.
 #define C_WAIT    C_STALE
+// An idle session that still has a workflow or background shell running. Not
+// amber: `wait` and `stale` mean an ask has gone unanswered, and `look` means
+// nothing is asking yet. The age is drawn cyan as well as the dot, because
+// C_WORK is already an azure and a 7 px dot alone would read as `work`.
+#define C_LOOK    0x07FF   // cyan
 
 // ---- Snapshot model ----
 struct Session {
@@ -226,6 +231,7 @@ static uint16_t stateColor(const char* st) {
   if (!strcmp(st, "need"))  return C_NEED;
   if (!strcmp(st, "held"))  return C_NEED;
   if (!strcmp(st, "wait"))  return C_WAIT;
+  if (!strcmp(st, "look"))  return C_LOOK;
   if (!strcmp(st, "idle"))  return C_IDLE;
   if (!strcmp(st, "stale")) return C_STALE;
   if (!strcmp(st, "err"))   return C_ERR;
@@ -399,6 +405,8 @@ static void drawRow(uint8_t i) {
     else    { bg = C_BG;   labelFg = ageFg = dot = C_NEED; }
   } else if (isAmberAge(s.state)) {
     ageFg = C_STALE;
+  } else if (!strcmp(s.state, "look")) {
+    ageFg = C_LOOK;
   } else if (!strcmp(s.state, "err")) {
     ageFg = C_ERR;
   } else if (!strcmp(s.state, "end")) {
@@ -647,11 +655,13 @@ static bool parseMessage(const char* line) {
 //
 // Lets the layout be judged on real hardware before any host software exists.
 //
-// Six rows for nine states, so this shows the six that carry colour policy. The
-// three rungs of the attention ladder lead, and `wait` is put next to `stale`
-// on purpose: they are meant to be indistinguishable, and the only way to check
-// that is to see them side by side. `idle`, `start` and `end` are unchanged and
-// easy enough to see on a live display.
+// Six rows for ten states, so this shows the ones whose look needs judging. The
+// three rungs of the attention ladder lead. `look` sits directly under `work`
+// because blue against cyan is the comparison most likely to fail on a small
+// panel. `wait` is put next to `stale` on purpose: they are meant to be
+// indistinguishable, and the only way to check that is to see them side by
+// side. `err`, `idle`, `start` and `end` are easy enough to see on a live
+// display.
 static void demoLoad() {
   Snapshot d;
   d.valid = true;
@@ -666,9 +676,9 @@ static void demoLoad() {
     {"env_monitoring", "need",   44, 41, "opus5"},
     {"data-pipeline",  "held",  305, -1, ""},
     {"session-beacon", "work",  126, 62, "fable5.1"},
+    {"inventory..vice2","look",  95, 18, "sonnet5"},
     {"nanovolt-divide","wait", 2760, -1, ""},
     {"web-frontend",   "stale", 900, -1, ""},
-    {"homelab",        "err",   362, 18, "sonnet5"},
   };
   for (uint8_t i = 0; i < 6; i++) {
     copyStr(d.s[i].id, sizeof d.s[i].id, "demo");

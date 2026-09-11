@@ -18,6 +18,7 @@ class State(StrEnum):
     WORKING = "work"
     NEEDS_INPUT = "need"
     NEEDS_HELD = "held"
+    NEEDS_LOOK = "look"
     WAITING = "wait"
     ERROR = "err"
     IDLE = "idle"
@@ -38,16 +39,20 @@ ATTENTION_STATES = (State.NEEDS_INPUT, State.NEEDS_HELD, State.WAITING)
 # on purpose settle into, so ranking it with the alarm states would park them in
 # the top rows permanently and push actively working sessions off a six-row
 # display. That is the noise the ladder exists to remove, not to relocate.
+#
+# NEEDS_LOOK sits just above WORKING: worth surfacing over a session that is
+# plainly busy, never competing with a real block or an error.
 PRIORITY = {
     State.NEEDS_INPUT: 0,
     State.NEEDS_HELD: 1,
     State.ERROR: 2,
-    State.WORKING: 3,
-    State.WAITING: 4,
-    State.STALE: 5,
-    State.STARTING: 6,
-    State.IDLE: 7,
-    State.ENDED: 8,
+    State.NEEDS_LOOK: 3,
+    State.WORKING: 4,
+    State.WAITING: 5,
+    State.STALE: 6,
+    State.STARTING: 7,
+    State.IDLE: 8,
+    State.ENDED: 9,
 }
 
 # Notification types that mean a human has to do something. Taken from the
@@ -76,6 +81,11 @@ class Session:
     permission_mode: str = ""
     error_type: str = ""
     bg_tasks: int = 0
+    # Background work the beacon cannot retire -- a workflow, a background shell,
+    # a teammate -- as listed by the last Stop or SubagentStop. It only decides
+    # how loud an idle_prompt is (NEEDS_LOOK rather than NEEDS_INPUT) and never
+    # whether the row is WORKING; that stays `bg_tasks`' job alone.
+    bg_other: int = 0
     # Which agent raised the attention this session is currently showing. "" is
     # the main thread. A subagent's hook events carry the *parent's* session_id,
     # so without this a subagent's tool call answers a prompt it never saw.
@@ -108,6 +118,10 @@ class SessionStore:
     # are absolute positions on the ladder rather than durations of each rung.
     need_pulse_s: float = 120.0
     need_red_s: float = 600.0
+    # How long an idle_prompt softened to NEEDS_LOOK stays soft before it joins
+    # the ladder anyway. Nothing reports the end of a workflow, so this timer is
+    # the only thing standing between a wrong guess and a session nobody sees.
+    look_s: float = 300.0
     ended_grace_s: float = 30.0
     # How long an outstanding background count is believed without fresh
     # evidence. See where it expires, in tick().
@@ -156,7 +170,7 @@ class SessionStore:
             s.set_state(State.STARTING, now)
         elif name == "UserPromptSubmit":
             s.error_type = ""
-            s.bg_tasks = 0
+            s.bg_tasks = s.bg_other = 0
             s.turn_over = False
             s.idle_held = False
             s.set_state(State.WORKING, now)
@@ -207,6 +221,8 @@ class SessionStore:
                 # notification to fall the wrong side of.
                 s.idle_held, s.idle_held_agent = True, agent
                 s.last_event = now
+            elif kind == "idle_prompt":
+                self._idle_prompt(s, now, agent)
             else:
                 self._want_attention(s, now, agent)
         elif name == "Stop":
@@ -220,6 +236,7 @@ class SessionStore:
             # the field records. It is not a claim that the turn is still
             # running.
             s.bg_tasks = running_background_tasks(ev)
+            s.bg_other = untracked_background_tasks(ev)
             s.bg_seen = now
             s.turn_over = bool(s.bg_tasks)
             s.set_state(State.WORKING if s.bg_tasks else State.IDLE, now)
@@ -235,6 +252,7 @@ class SessionStore:
                 # its own payload; it is not, in the one capture we have, but
                 # counting it would put the stale count straight back.
                 s.bg_tasks = running_background_tasks(ev, exclude=agent)
+                s.bg_other = untracked_background_tasks(ev, exclude=agent)
             else:
                 # The field is optional in the CLI's schema, so do not read an
                 # absent list as "nothing left running".
@@ -306,6 +324,32 @@ class SessionStore:
         s.attn_agent = agent
         s.set_state(State.NEEDS_INPUT, now)
 
+    @classmethod
+    def _idle_prompt(cls, s: Session, now: float, agent: str) -> None:
+        """An `idle_prompt` nothing is holding back. How loud it should be depends
+        on what is still running.
+
+        With untracked background work outstanding -- the case that turned this
+        up was an orchestrator waiting on a `workflow` task -- the notification
+        means no more than "the main thread has been quiet a while", so it gets
+        NEEDS_LOOK rather than the pulse a permission prompt gets. tick()
+        graduates it onto the ladder after `look_s` if nothing clears it first,
+        because nothing announces the end of a workflow and a wrong guess must
+        not be able to hide a session for good.
+
+        Repeats leave the row where it is, the same rule the ladder follows: a
+        timer that restarts on every notification never runs out.
+        """
+        if s.state in ATTENTION_STATES or s.state == State.NEEDS_LOOK:
+            s.last_event = now
+            return
+        if not s.bg_other:
+            cls._want_attention(s, now, agent)
+            return
+        s.idle_held = False
+        s.attn_agent = agent
+        s.set_state(State.NEEDS_LOOK, now)
+
     def apply_status(self, st: dict[str, Any], now: float) -> None:
         """Apply one statusline payload. Field names to be confirmed in Phase 1."""
         sid = st.get("session_id")
@@ -346,12 +390,24 @@ class SessionStore:
             if s.idle_held and not s.bg_tasks:
                 s.idle_held = False
                 agent, s.idle_held_agent = s.idle_held_agent, ""
-                self._want_attention(s, now, agent)
+                # Through the same severity check as a fresh notification: a
+                # subagent can retire while a workflow is still listed.
+                self._idle_prompt(s, now, agent)
 
             if s.state == State.WORKING and now - s.last_event > self.stale_after_s:
                 # Same reasoning as above for a turn that ended and then went
                 # quiet without the count ever being retired.
                 s.set_state(State.IDLE if s.turn_over else State.STALE, now)
+            elif s.state == State.NEEDS_LOOK and now - s.state_since > self.look_s:
+                # The safety valve. Nothing reports that a workflow ended, so a
+                # soft row cannot wait for proof; left alone this long it joins
+                # the ladder exactly where an unsoftened idle_prompt would have.
+                #
+                # Unlike the rungs below, this goes through set_state() and so
+                # restarts the age. Time spent here was not time spent waiting
+                # on a human, by this state's own definition, so the ladder's
+                # two and ten minutes are counted from when the alarm began.
+                self._want_attention(s, now, s.attn_agent)
             # The ladder assigns `state` directly instead of calling set_state(),
             # which is the opposite of the STALE transition above and looks like
             # a bug until you see why: set_state() resets state_since, and that
@@ -405,14 +461,15 @@ class SessionStore:
         return [
             {
                 "id": s.session_id[:8],
-                "l": s.label[:16],
+                "l": elide_label(s.label),
                 "tasks": s.bg_tasks,
+                "other": s.bg_other,
                 "turn_over": s.turn_over,
                 "idle_held": s.idle_held,
                 "bg_seen_age_s": round(now - s.bg_seen, 1) if s.bg_seen else None,
             }
             for s in self.sessions.values()
-            if s.bg_tasks or s.turn_over or s.idle_held
+            if s.bg_tasks or s.bg_other or s.turn_over or s.idle_held
         ]
 
     # ---- internals ----
@@ -470,7 +527,7 @@ class SessionStore:
     def _row(s: Session, now: float) -> dict[str, Any]:
         row: dict[str, Any] = {
             "id": s.session_id[:8],
-            "l": s.label[:16],
+            "l": elide_label(s.label),
             "st": s.state.value,
             "age": int(now - s.state_since),
         }
@@ -508,6 +565,13 @@ def last_batch_tool(ev: dict[str, Any]) -> str:
 # registered for as long as the session lives, so counting it meant a session
 # could never be shown as waiting on you again -- which is what happened.
 COUNTED_TASK_TYPES = frozenset({"subagent"})
+
+# Task types that are never work in flight, even for the softer signal below.
+# A `monitor` is a subscription that lives as long as the session does, and the
+# other two are Claude Code's own housekeeping. Counting any of them would soften
+# every idle_prompt the session ever sends, which is the monitor bug again with
+# a delay in front of it.
+UNTRACKED_EXCLUDED_TYPES = frozenset({"monitor", "dream", "auto-mode scan"})
 
 # Claude Code only lists in-flight work, and its own filter admits both of
 # these; `pending` was previously dropped because the check compared against
@@ -549,6 +613,47 @@ def running_background_tasks(ev: dict[str, Any], exclude: str = "") -> int:
         and t.get("status", "running") in LIVE_STATUSES
         and not (exclude and t.get("id") == exclude)
     )
+
+
+def untracked_background_tasks(ev: dict[str, Any], exclude: str = "") -> int:
+    """How much *other* real work a Stop payload reports as still in flight.
+
+    Everything `running_background_tasks()` deliberately ignores, less the types
+    that never finish (UNTRACKED_EXCLUDED_TYPES): `workflow`, `shell`,
+    `MCP task`, `teammate`, `cloud session`. The beacon cannot retire any of
+    these, so the figure never keeps a row WORKING. It only softens an
+    idle_prompt to NEEDS_LOOK.
+
+    An unrecognised `type` *is* counted here, the opposite of the subagent
+    count, because the costs have flipped. NEEDS_LOOK graduates to the ladder on
+    its own after `look_s`, so a wrong guess costs at most that long; the
+    subagent count has no such backstop, which is why it refuses to guess.
+    """
+    tasks = ev.get("background_tasks")
+    if not isinstance(tasks, list):
+        return 0
+    return sum(
+        1 for t in tasks
+        if isinstance(t, dict)
+        and t.get("type") not in COUNTED_TASK_TYPES
+        and t.get("type") not in UNTRACKED_EXCLUDED_TYPES
+        and t.get("status", "running") in LIVE_STATUSES
+        and not (exclude and t.get("id") == exclude)
+    )
+
+
+def elide_label(label: str, width: int = 16, head: int = 9, tail: int = 5) -> str:
+    """Fit a label to `width` by cutting from the middle, not the end.
+
+    Clones of one project tend to differ only in a suffix -- `longnameclone2`,
+    `longnameclone3` -- and a plain prefix cut threw exactly that away, so every
+    clone's row read the same. `head + 2 + tail == width`, so the result is
+    always full width. Two ASCII dots rather than an ellipsis character because
+    the device's font is ASCII only.
+    """
+    if len(label) <= width:
+        return label
+    return f"{label[:head]}..{label[-tail:]}"
 
 
 def short_model(display_name: str) -> str:

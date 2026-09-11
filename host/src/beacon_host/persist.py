@@ -39,7 +39,7 @@ FORMAT_V = 1
 # restart: a restored red row whose owner is forgotten reads as the main
 # thread's, and the first tool event from anywhere clears it.
 #
-# `bg_tasks`, `bg_seen` and `turn_over` are deliberately absent. Nothing tells
+# `bg_tasks`, `bg_other`, `bg_seen` and `turn_over` are deliberately absent. Nothing tells
 # the daemon what happened to a subagent while it was down, and forgetting the
 # count errs towards letting an idle_prompt escalate, which is the direction
 # this state exists to protect.

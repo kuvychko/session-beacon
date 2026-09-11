@@ -109,13 +109,17 @@ are cached, since hooks fire on every tool call and this touches the filesystem.
 Overrides in the host config are matched against both the exact `cwd` and the resolved
 repository root, so keying them by repo root works.
 
+This diagram is written in hook events, for working on the code. The README has
+[the same machine as the display shows it](../README.md#what-the-colours-mean).
+
 ```mermaid
 stateDiagram-v2
     [*] --> STARTING: SessionStart
     STARTING --> WORKING: UserPromptSubmit
     IDLE --> WORKING: UserPromptSubmit
     WORKING --> WORKING: PreToolUse / PostToolUse / PostToolBatch
-    WORKING --> NEEDS_INPUT: PermissionRequest
+    STARTING --> NEEDS_INPUT: PermissionRequest / direct-ask Notification
+    WORKING --> NEEDS_INPUT: PermissionRequest / direct-ask Notification
     NEEDS_INPUT --> NEEDS_HELD: after need_pulse_s
     NEEDS_HELD --> WAITING: after need_red_s
     NEEDS_INPUT --> WORKING: PostToolBatch / PostToolUse
@@ -125,15 +129,19 @@ stateDiagram-v2
     WORKING --> WORKING: Stop (a subagent still running)
     WORKING --> IDLE: SubagentStop (the last one, turn already over)
     WORKING --> IDLE: the background count expires, turn already over
-    IDLE --> NEEDS_INPUT: a held idle_prompt is released
+    IDLE --> NEEDS_INPUT: idle_prompt, fresh or released from hold, nothing untracked listed
+    IDLE --> NEEDS_LOOK: idle_prompt, fresh or released from hold, untracked work listed
+    NEEDS_LOOK --> NEEDS_INPUT: after look_s, or a direct ask
+    NEEDS_LOOK --> WORKING: PostToolUse / PostToolBatch / UserPromptSubmit
+    NEEDS_LOOK --> IDLE: Stop
     WORKING --> ERROR: StopFailure
     WORKING --> STALE: no event for stale_after_s
     STALE --> WORKING: PostToolUse / UserPromptSubmit
     ERROR --> WORKING: UserPromptSubmit
-    IDLE --> NEEDS_INPUT: Notification(idle_prompt)
     STARTING --> ENDED: SessionEnd
     WORKING --> ENDED: SessionEnd
     IDLE --> ENDED: SessionEnd
+    NEEDS_LOOK --> ENDED: SessionEnd
     NEEDS_INPUT --> ENDED: SessionEnd
     NEEDS_HELD --> ENDED: SessionEnd
     WAITING --> ENDED: SessionEnd
@@ -141,6 +149,12 @@ stateDiagram-v2
     STALE --> ENDED: SessionEnd
     ENDED --> [*]: after grace period
 ```
+
+"Direct ask" means `PermissionRequest`, or a `Notification` of type
+`permission_prompt`, `elicitation_dialog`, `elicitation_url_dialog` or
+`agent_needs_input`. "Untracked work" is any live `background_tasks` entry other
+than a `subagent`, a `monitor`, `dream` or `auto-mode scan`; see
+[the soft rung](#the-soft-rung-needs_look).
 
 State semantics:
 
@@ -151,6 +165,7 @@ State semantics:
 | `NEEDS_INPUT` | Blocked on a permission prompt, or idle-waiting for you after a notification. The first two minutes of it | red, pulsing |
 | `NEEDS_HELD` | Same thing, two to ten minutes in | red, static |
 | `WAITING` | Same thing, over ten minutes in | amber |
+| `NEEDS_LOOK` | Claude has gone idle, but a workflow, a background shell or similar is still running. Joins `NEEDS_INPUT` after `look_s` (default 300 s) | cyan |
 | `ERROR` | The turn ended on an API error such as a rate limit or an overload | magenta |
 | `IDLE` | Claude finished its turn, waiting for the next prompt | green |
 | `STALE` | `WORKING` but no event for `stale_after_s` (default 300 s) | amber |
@@ -263,6 +278,57 @@ docs and the sort can tell them apart.
 
 Both thresholds are config, next to `stale_after_s`.
 
+### The soft rung: NEEDS_LOOK
+
+An orchestrator session, `inventory-service2`, went filled red and pulsing while
+it waited on a background `workflow` task. Nothing was blocked. The row cleared
+itself the moment the session's own thread touched a tool again. The mechanism is
+the subagent false alarm again, one task type wider: only `subagent` is counted,
+so the `Stop` read as "nothing running", the row went `IDLE`, and the next
+`idle_prompt` skipped the hold and took the full alarm.
+
+Widening the count is not the fix. Only a subagent can be retired (`SubagentStop`)
+or confirmed alive (its own `agent_id` events), so counting anything else can only
+mute the display, and a `monitor` never ends. That is the lesson of the monitor
+bug above, and it still stands.
+
+What was actually wrong is that the ladder had one severity for two different
+messages. A permission prompt says "I cannot go on without you". An
+`idle_prompt` says only "the main thread has been quiet a while", and while real
+work is still running somewhere, that deserves a glance, not an alarm. So:
+
+- A second count, `bg_other`, is kept beside `bg_tasks`. It holds live
+  `background_tasks` entries that are neither a `subagent` nor work that never
+  ends (`monitor`, `dream`, `auto-mode scan`). It **never** decides `WORKING`
+  against `IDLE`. It only picks how loud an `idle_prompt` is.
+- An `idle_prompt` that nothing holds back, with `bg_other` nonzero, gives
+  `NEEDS_LOOK`: a cyan dot and a cyan age, sorted between `ERROR` and `WORKING`.
+  With nothing outstanding it goes to `NEEDS_INPUT` as before. A direct ask
+  (`PermissionRequest`, `permission_prompt`, the elicitation types,
+  `agent_needs_input`) goes to `NEEDS_INPUT` however much work is running,
+  including from a row that is already cyan.
+- A held `idle_prompt` released by `tick()` goes through the same check, so a
+  subagent retiring while a workflow is still listed lands on cyan, not red.
+
+**The safety valve is a timer.** Nothing announces the end of a workflow, so
+`NEEDS_LOOK` cannot wait for proof that the work finished. After `look_s`
+(default 300 s) it graduates to `NEEDS_INPUT`, exactly where the unsoftened
+notification would have gone. That is why unknown task types are counted here
+while the subagent count ignores them: a wrong guess here costs at most `look_s`,
+and the subagent count has no backstop at all. It also means a workflow that runs
+longer than `look_s` still ends in red. That is the known limit, and the trade
+against a session that really is waiting on you sitting cyan indefinitely.
+
+Graduation goes through `set_state()`, so the age restarts and the ladder's two
+and ten minutes count from the moment the alarm begins. The rungs deliberately do
+not reset the age. Graduation does, because time spent cyan was not time spent
+waiting on a human, by this state's own definition.
+
+Repeat `idle_prompt`s leave a cyan row where it is, the same rule the ladder
+follows, or the timer would never run out. Any tool event, a prompt, or a `Stop`
+takes the row out of `NEEDS_LOOK`. It is not in the attention family, so unlike a
+red row it does not wait for the agent that raised it.
+
 Additional per-session info:
 
 - **Elapsed time in current state** (e.g. "waiting 4m"). Computed on host, sent as seconds.
@@ -301,7 +367,7 @@ Nothing tells the daemon that a window was closed while it was down, because `Se
 
 Device handling assumes the link is never reliable. The board disappears on every reflash, Windows can move the COM number if the cable changes port, and the Arduino IDE's serial monitor will hold the port if it is open. Every send is best-effort, a failure just drops the link, and reconnection is attempted every two seconds. Port discovery falls back to USB VID/PID so a moved cable needs no config change.
 
-Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s`, `uptime_s`, `rows`, which is what is currently on the display, and `bg`, which is why a row is *not* red. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. `bg` does the same job for the other silent failure: a row held behind a background count looks exactly like a session that is genuinely busy, and working out which needed the persisted state file plus the session's own transcript. It carries the outstanding count, whether the turn had ended, whether an `idle_prompt` is being held, and how long ago the count was last confirmed — and it is empty unless a session has something outstanding. A tray icon is a possible later addition, not phase 1.
+Daemon lifecycle on Windows: `scripts/install-task.ps1` registers a Scheduled Task that starts it at logon with `pythonw.exe`, so there is no console window, and restarts it if it dies. A task rather than a service, because the daemon only matters while you are logged in and a task is far easier to inspect and remove. `GET /health` reports whether the device is connected, plus `sessions`, `events_received`, `last_event_age_s`, `uptime_s`, `rows`, which is what is currently on the display, and `bg`, which is why a row is *not* red. Answering "why does the screen say that" should not require a serial cable. `events_received` is the field that separates "hooks not installed" from a daemon or wiring fault, and the daemon also logs a warning if a minute passes with no events at all. `bg` does the same job for the other silent failure: a row held behind a background count looks exactly like a session that is genuinely busy, and working out which needed the persisted state file plus the session's own transcript. It carries the outstanding subagent count, the untracked-work count behind a `look` row (`other`), whether the turn had ended, whether an `idle_prompt` is being held, and how long ago the count was last confirmed — and it is empty unless a session has something outstanding. A tray icon is a possible later addition, not phase 1.
 
 ## Firmware internals
 
@@ -359,7 +425,7 @@ Six rows of 16 px fit between the header and the footer, using the default 6x8 G
 |---------|---------|-------|
 | Featured marker | 0 to 1 | Present only on the session the footer describes |
 | Dot | 3 to 9 | Filled circle in the state colour |
-| Label | 13 to 109 | Up to 16 characters, truncated by the host |
+| Label | 13 to 109 | Up to 16 characters. The host shortens longer ones from the middle (`inventory..vice2`), so clones that differ only in a suffix stay distinct |
 | Age | ends at 157 | Right-aligned, up to 4 characters |
 
 That leaves 24 px of clear space between the longest label and the longest age.
@@ -371,6 +437,7 @@ Row colours:
 | `need` | none, the row itself is the signal | Filled edge to edge, alternating red-on-black and black-on-red twice a second |
 | `held` | none, as `need` | Filled edge to edge in red, static. Drawn once and never repainted |
 | `wait` | amber | Age also drawn amber. Identical to `stale`, deliberately |
+| `look` | cyan | Age also drawn cyan. The age carries it because `work`'s blue is already an azure, too close for a 7 px dot alone |
 | `work` | blue | Plain |
 | `idle` | green | Plain |
 | `stale` | amber | Age also drawn amber |
@@ -413,7 +480,7 @@ The pulse alternates between two readable states rather than flashing text in an
 
 Only `need` is repainted on the blink tick. A `held` row is the same fill held permanently in the phase `need` spends half its time in, so it is drawn once and then costs nothing per frame however many of them are on screen.
 
-If more than six sessions are live, the host sorts the red rungs first, then `err`, then `work`, then the rest, and the header's active count reveals the overflow. Sessions that have been waiting long enough to reach `wait` sort below `work`, so a row of parked sessions cannot push a working one off the display.
+If more than six sessions are live, the host sorts the red rungs first, then `err`, then `look`, then `work`, then the rest, and the header's active count reveals the overflow. Sessions that have been waiting long enough to reach `wait` sort below `work`, so a row of parked sessions cannot push a working one off the display.
 
 **Only changed regions are repainted.** A full repaint over software SPI is slow enough to be visible as a sweep, and the host resends a snapshot every second purely to advance the timers. The device keeps a record of what each row currently shows and compares the *formatted* age string rather than the raw seconds, so a row showing `14m` stays untouched for a full minute. In steady state a snapshot costs nothing to draw.
 

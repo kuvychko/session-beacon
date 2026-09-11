@@ -17,6 +17,9 @@ class Config:
     stale_after_s: float = 300.0
     need_pulse_s: float = 120.0       # how long an attention row pulses
     need_red_s: float = 600.0         # how long it stays red at all
+    # How long an idle_prompt softened by untracked background work (a workflow,
+    # a background shell) stays a calm `look` row before joining the ladder.
+    look_s: float = 300.0
     # How long an outstanding background-task count is believed without fresh
     # evidence, before an idle_prompt is allowed through anyway.
     bg_quiet_s: float = 180.0
@@ -46,7 +49,7 @@ class Config:
             raw = tomllib.load(f)
 
         for key in ("port", "http_port", "stale_after_s", "need_pulse_s",
-                    "need_red_s", "bg_quiet_s", "ended_grace_s", "max_rows",
+                    "need_red_s", "look_s", "bg_quiet_s", "ended_grace_s", "max_rows",
                     "log_file", "state_file", "restore_max_age_s", "log_level"):
             if key in raw:
                 setattr(cfg, key, raw[key])

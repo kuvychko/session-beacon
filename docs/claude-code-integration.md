@@ -158,6 +158,16 @@ are not symmetric: a wrongly ignored task shows a red row that de-escalates in t
 minutes and clears on the next tool call, while a wrongly counted one that never
 ends silences the session for good and says nothing about why.
 
+**The other types still soften an `idle_prompt`, and nothing else.** A second
+count, `bg_other`, takes every live entry that is neither a `subagent` nor one of
+the types that never end (`monitor`, `dream`, `auto-mode scan`). An unrecognised
+type counts here. While `bg_other` is nonzero, an `idle_prompt` turns the row
+cyan (`look`) instead of red, and after `look_s` it goes red anyway. This was
+added after an orchestrator waiting on a `workflow` task was shown the full
+alarm. The count plays no part in whether a row is `WORKING`, and the direct-ask
+notification types are not softened. See
+[the soft rung](architecture.md#the-soft-rung-needs_look).
+
 `Stop` and `SubagentStop` also carry `session_crons` — the `/loop`, `CronCreate`
 and `ScheduleWakeup` entries that will wake the session later. Nothing reads it
 yet. It is redacted at capture time because each entry carries the prompt text.

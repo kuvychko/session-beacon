@@ -56,7 +56,17 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   amber, never red: only a subagent can be retired (`SubagentStop`) or confirmed
   alive (its own `agent_id` events), so counting anything else can only mute the
   display, and a monitor never ends. An unknown `type` is ignored for the same
-  reason. Do not "generalise" this back to counting every entry.
+  reason. Do not "generalise" this back to counting every entry. The other
+  types have their own, weaker signal; see the next point.
+- `bg_other` and `NEEDS_LOOK` (`look`, cyan) only ever decide how loud an
+  `idle_prompt` is. Never feed `bg_other` into `bg_tasks` or into the
+  `WORKING`/`IDLE` decision, and keep `monitor` out of it
+  (`UNTRACKED_EXCLUDED_TYPES`). It counts unknown types, unlike `bg_tasks`,
+  and that is only safe because `tick()` graduates `NEEDS_LOOK` to
+  `NEEDS_INPUT` after `look_s`. Remove the graduation and a wrong guess hides
+  a session for good, which is the monitor bug again.
+- Labels longer than 16 characters are elided in the middle by
+  `elide_label()`, not cut at the end. Clones differ only in their suffix.
 - A held `idle_prompt` is remembered on the session, never dropped. Claude Code
   sent exactly one for the idle period that turned this up, so dropping it meant
   the row never went red. `tick()` releases it when the count retires.

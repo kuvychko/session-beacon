@@ -75,21 +75,21 @@ flowchart LR
 ```
 
 1. **Claude Code hooks** fire on session lifecycle events. Each one is a single `curl` call to the daemon, which measured about eight times cheaper than starting a Python interpreter per event.
-2. **beacon-host** keeps a per-session state machine (starting / working / needs input, which decays through two quieter rungs / error / idle / stale / ended), decides how loudly each one should be shown, enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
+2. **beacon-host** keeps a per-session state machine (see [what the colours mean](#what-the-colours-mean)), decides how loudly each one should be shown, enriches it with cost and context data from the statusline hook, and pushes a compact snapshot to the device whenever anything changes.
 3. **Firmware** is deliberately dumb: it parses the snapshot and draws it. All policy lives on the host so it can change without reflashing.
 
 On the screen, one row per session:
 
 ```
 +----------------------------------------+
-| BEACON      4 active         $61.17    |
+| BEACON      6 active         $61.17    |
 |----------------------------------------|
 |############ env_monitoring     44s ####|  wants you now: filled red, pulsing
 |############ data-pipeline       5m ####|  still waiting: filled red, static
 | o session-beacon                 2m    |  blue: working
+| o inventory..vice2               3m    |  cyan: idle, background work running
 | o web-frontend                  15m    |  amber: busy but gone quiet
 | o homelab                        7s    |  green: finished its turn
-|                                        |
 |----------------------------------------|
 | ctx  73% [#######...]         opus5    |  <- 4s
 | 5h   92% [#########.]      7d  28%     |  -> 4s
@@ -109,6 +109,89 @@ another eight, then settles to an amber dot and sinks below the working sessions
 Leaving a session parked is a normal way to work, and a red light that never goes
 out is one you stop reading. Both timings are config. See
 [the attention ladder](docs/architecture.md#the-attention-ladder).
+
+Labels longer than the 16 characters a row has room for lose their middle, not
+their end, so `inventory-service2` shows as `inventory..vice2`. Two clones of one
+repository usually differ only at the end of the name.
+
+### What the colours mean
+
+Every row is in one of these states. The diagram shows how a session moves
+between them. All the timings are defaults and can be changed in
+`host/config.toml`.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "STARTING: grey dot" as STARTING
+    state "WORKING: blue dot" as WORKING
+    state "IDLE: green dot" as IDLE
+    state "NEEDS_LOOK: cyan dot and age" as NEEDS_LOOK
+    state "STALE: amber dot and age" as STALE
+    state "ERROR: magenta dot and age" as ERROR
+    state "Waiting on you" as ASK {
+        state "NEEDS_INPUT: red row, pulsing" as NEEDS_INPUT
+        state "NEEDS_HELD: red row, steady" as NEEDS_HELD
+        state "WAITING: amber dot and age" as WAITING
+        [*] --> NEEDS_INPUT
+        NEEDS_INPUT --> NEEDS_HELD: 2 min in
+        NEEDS_HELD --> WAITING: 10 min in
+    }
+
+    [*] --> STARTING: session opens
+    STARTING --> WORKING: you send a prompt
+    IDLE --> WORKING: you send a prompt
+    ERROR --> WORKING: you send a prompt
+    WORKING --> IDLE: Claude finishes its turn
+    WORKING --> ERROR: API error, e.g. a rate limit
+    WORKING --> STALE: no activity for 5 min
+    STALE --> WORKING: activity resumes
+    WORKING --> ASK: permission prompt or question
+    IDLE --> ASK: Claude has waited on you a while
+    IDLE --> NEEDS_LOOK: same, but a workflow or background shell is still running
+    NEEDS_LOOK --> WORKING: Claude picks up again
+    NEEDS_LOOK --> ASK: still quiet 5 min later
+    ASK --> WORKING: you answer
+
+    classDef grey fill:#8c8c8c,stroke:#5c5c5c,color:#fff
+    classDef blue fill:#009eff,stroke:#0070b8,color:#fff
+    classDef green fill:#1db954,stroke:#12803a,color:#fff
+    classDef cyan fill:#00e5e5,stroke:#009999,color:#003333
+    classDef red fill:#e02020,stroke:#901010,color:#fff
+    classDef amber fill:#ffa400,stroke:#b37300,color:#000
+    classDef magenta fill:#ff00ff,stroke:#a000a0,color:#fff
+    class STARTING grey
+    class WORKING blue
+    class IDLE green
+    class NEEDS_LOOK cyan
+    class NEEDS_INPUT,NEEDS_HELD red
+    class WAITING,STALE amber
+    class ERROR magenta
+```
+
+Any state goes to `ENDED`, a grey label, when the session closes, and the row is
+dropped 30 seconds later.
+
+| State | On the display | What it means | What to do |
+|-------|----------------|---------------|------------|
+| `STARTING` | grey dot | The session opened; no prompt yet | Nothing |
+| `WORKING` | blue dot | Claude is thinking or using tools, or the turn has ended but a subagent it started is still running | Nothing |
+| `IDLE` | green dot | Claude finished its turn | Send the next prompt when you're ready |
+| `NEEDS_LOOK` | cyan dot, cyan age | Claude has gone quiet, but a workflow, background shell or similar is still running, so it is probably waiting on that and not on you | Glance at it when convenient. It turns red after 5 min |
+| `NEEDS_INPUT` | whole row red, pulsing | Blocked on you: a permission prompt, a question, or idle with nothing else running | Answer it |
+| `NEEDS_HELD` | whole row red, steady | The same, 2 to 10 minutes in | Answer it |
+| `WAITING` | amber dot, amber age | The same, over 10 minutes in. Sorted below working sessions | Answer it when you get back |
+| `STALE` | amber dot, amber age | Was working, but nothing has been heard for 5 min. Often a closed or crashed window | Check the window |
+| `ERROR` | magenta dot, magenta age | The turn ended on an API error such as a rate limit | Retry when you can |
+| `ENDED` | grey label | The session closed | Nothing; the row disappears |
+
+Rows are sorted so the most urgent come first: the red rows, then `ERROR`,
+`NEEDS_LOOK`, `WORKING`, `WAITING`, `STALE`, `STARTING`, `IDLE`. The age on each
+row is how long the session has been in its current state. Across the red and
+amber rungs it keeps counting, so it shows how long the session has been waiting
+on you. It restarts when a cyan row turns red.
+[docs/architecture.md](docs/architecture.md#session-state-machine) has the same
+machine in terms of Claude Code hook events.
 
 The beacon also reports itself in the terminal, through the same status line that
 feeds it the cost and context figures:
@@ -221,7 +304,7 @@ it yet.
 ```powershell
 cd host
 uv sync
-uv run pytest                        # 51 tests, no hardware needed
+uv run pytest                        # no hardware needed
 uv run beacon-host --dry-run -v      # prints snapshots, Ctrl-C to stop
 cd ..
 ```
