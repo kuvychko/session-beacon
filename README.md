@@ -176,14 +176,21 @@ dropped 30 seconds later.
 |-------|----------------|---------------|------------|
 | `STARTING` | grey dot | The session opened; no prompt yet | Nothing |
 | `WORKING` | blue dot | Claude is thinking or using tools, or the turn has ended but a subagent it started is still running | Nothing |
-| `IDLE` | green dot | Claude finished its turn | Send the next prompt when you're ready |
+| `IDLE` | green dot | Claude finished its turn and has nothing left running. Nothing has asked for you yet. This includes a turn that ends with a question in plain text | Send the next prompt when you're ready. It turns red once Claude Code reports the session has sat idle a while |
 | `NEEDS_LOOK` | cyan dot, cyan age | Claude has gone quiet, but a workflow, background shell or similar is still running, so it is probably waiting on that and not on you | Glance at it when convenient. It turns red after 5 min |
-| `NEEDS_INPUT` | whole row red, pulsing | Blocked on you: a permission prompt, a question, or idle with nothing else running | Answer it |
+| `NEEDS_INPUT` | whole row red, pulsing | Blocked on you. Red at once for a permission prompt or a question dialog; red later for a green row Claude Code has flagged as idle too long | Answer it |
 | `NEEDS_HELD` | whole row red, steady | The same, 2 to 10 minutes in | Answer it |
 | `WAITING` | amber dot, amber age | The same, over 10 minutes in. Sorted below working sessions | Answer it when you get back |
 | `STALE` | amber dot, amber age | Was working, but nothing has been heard for 5 min. Often a closed or crashed window | Check the window |
 | `ERROR` | magenta dot, magenta age | The turn ended on an API error such as a rate limit | Retry when you can |
 | `ENDED` | grey label | The session closed | Nothing; the row disappears |
+
+Green and red both mean Claude is waiting on you. The difference is whether
+anything has said so. A finished turn (`Stop`) is green, because it is not
+urgent yet. A row turns red when Claude Code says it is blocked: straight away
+for a permission prompt or a dialog, or later through its `idle_prompt`
+notification once a green row has gone unanswered. The beacon keeps no idle
+timer of its own. It turns red only when Claude Code sends that notification.
 
 Rows are sorted so the most urgent come first: the red rows, then `ERROR`,
 `NEEDS_LOOK`, `WORKING`, `WAITING`, `STALE`, `STARTING`, `IDLE`. The age on each
