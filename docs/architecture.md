@@ -463,8 +463,10 @@ It carries two pages, four seconds each:
 
 The context page describes **one** session, the one at `sel`, and that row carries a
 two-pixel marker down its left edge so it is visible which. The marker takes the
-label's colour, so it adapts to the state for free: white normally, black against the
-filled attention row, grey on an ended one. It stays put rather than appearing only
+label's colour, so it adapts to the state for free: white normally, grey on an ended
+one. The exception is red fill, where the label is black. A black bar there read as
+the fill starting a pixel late compared with the red row below, so on red it is
+white instead. It stays put rather than appearing only
 while the context page is up, because a marker blinking every four seconds would be
 worse than a slightly imprecise one. The usage page is account-wide and belongs to no
 row.

@@ -423,9 +423,12 @@ static void drawRow(uint8_t i) {
 
   if (fresh) tft.fillRect(0, y, W, ROW_H, bg);
   // Same colour as the label, so it adapts to the state without another rule:
-  // white normally, black against the filled attention row, grey when ended.
+  // white normally, grey when ended. Except against red fill, where the label
+  // is black: a black bar there does not read as a marker, it reads as the
+  // fill starting a pixel late compared with the red row below it.
+  const uint16_t marker = (bg == C_NEED) ? C_TEXT : labelFg;
   if (fresh || v.featured != featured || v.labelFg != labelFg)
-    tft.fillRect(0, y, SEL_W, ROW_H, featured ? labelFg : bg);
+    tft.fillRect(0, y, SEL_W, ROW_H, featured ? marker : bg);
   if (fresh || v.dot != dot) tft.fillCircle(DOT_CX, y + ROW_H / 2, DOT_R, dot);
 
   tft.setTextSize(1);
