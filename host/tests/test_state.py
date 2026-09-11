@@ -747,6 +747,39 @@ def test_the_hold_expiring_does_not_disturb_a_session_mid_turn():
     assert st.sessions["abc12345-0000"].state == State.WORKING
 
 
+# ---- ghosts ----------------------------------------------------------------
+
+
+def test_a_session_silent_for_a_day_is_dropped_whatever_its_state():
+    """A window killed without a SessionEnd never sends another event, and
+    nothing else removes it. One sat on the display for 45 hours."""
+    for name, extra in (("UserPromptSubmit", {}),                       # -> stale
+                        ("Stop", {}),                                   # idle
+                        ("PermissionRequest", {"tool_name": "Bash"})):  # -> wait
+        st = SessionStore(ghost_after_s=86400)
+        st.apply_event(ev(name, **extra), 0)
+        # Settle first, the way the running loop would. A host-side transition
+        # such as going STALE stamps last_event too, so the cutoff can run up
+        # to stale_after_s late on a day-long window, which does not matter.
+        st.tick(1000)
+        st.tick(86400)
+        assert "abc12345-0000" in st.sessions, name
+        st.tick(87401)
+        assert "abc12345-0000" not in st.sessions, name
+
+
+def test_a_parked_session_that_keeps_being_notified_is_not_a_ghost():
+    """The cutoff runs from the last event, not from state_since: a WAITING row
+    keeps its age across repeat notifications, and those are proof of life."""
+    st = SessionStore(ghost_after_s=86400)
+    st.apply_event(ev("PermissionRequest", tool_name="Bash"), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 80000)
+    st.tick(100000)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WAITING
+    assert st.snapshot(100000)["s"][0]["age"] == 100000
+
+
 # ---- /health ---------------------------------------------------------------
 
 

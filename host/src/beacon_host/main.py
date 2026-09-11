@@ -137,6 +137,7 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
         look_s=cfg.look_s,
         bg_quiet_s=cfg.bg_quiet_s,
         ended_grace_s=cfg.ended_grace_s,
+        ghost_after_s=cfg.restore_max_age_s,
         max_rows=cfg.max_rows,
         label_overrides=cfg.labels,
     )
@@ -147,7 +148,8 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
     state_path = None
     if persist_state and not dry_run:
         state_path = Path(cfg.state_file) if cfg.state_file else default_state_path()
-        persist.load(state_path, store, time.time(), cfg.restore_max_age_s)
+        persist.load(state_path, store, time.time(), cfg.restore_max_age_s,
+                     booted_at=persist.boot_time())
 
     link = None if dry_run else SerialLink(cfg.port)
     hook_server.set_device_ok(bool(dry_run))

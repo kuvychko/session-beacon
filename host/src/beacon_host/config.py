@@ -30,6 +30,7 @@ class Config:
     # A session parked overnight is still a session; one untouched for longer
     # than this is more likely a window closed while the daemon was down, whose
     # SessionEnd went nowhere. Restoring that would show a row that never moves.
+    # The running store applies the same cutoff, so a restart cannot renew one.
     restore_max_age_s: float = 86400.0
     log_level: str = "INFO"
     labels: dict[str, str] = field(default_factory=dict)

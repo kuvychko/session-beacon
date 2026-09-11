@@ -31,7 +31,10 @@ max_rows = 6           # rows the display can show; the host sorts and truncates
 # Defaults to sessions.json beside the log, which uninstall.ps1 already clears.
 # Run with --no-persist to switch it off.
 # state_file = "C:/Users/you/AppData/Local/session-beacon/sessions.json"
-restore_max_age_s = 86400   # on restart, ignore sessions untouched for longer
+# A session with no activity for this long is treated as a ghost, a window
+# killed without ending its session, and dropped: at startup and while running.
+# Sessions saved before the PC last rebooted are never restored at all.
+restore_max_age_s = 86400
 log_level = "INFO"
 
 # Rows are labelled with the name of the git repository enclosing the session's

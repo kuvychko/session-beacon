@@ -5,6 +5,7 @@ restart drops it and the display under-reports until the user touches it.
 """
 
 import json
+import time
 
 from beacon_host import persist
 from beacon_host.state import SessionStore, State
@@ -51,6 +52,36 @@ def test_a_look_row_survives_and_still_graduates(tmp_path):
     assert b.sessions["o"].state == State.NEEDS_LOOK
     b.tick(311)
     assert b.sessions["o"].state == State.NEEDS_INPUT
+
+
+def test_nothing_is_restored_across_a_reboot(tmp_path):
+    """Windows Update restarted the machine, killing a session without a
+    SessionEnd. It was restored at logon and shown for 45 hours."""
+    p = tmp_path / "sessions.json"
+    a = SessionStore()
+    a.apply_event(ev("Stop", "dead"), 1000)
+    a.apply_event(ev("Notification", "dead", notification_type="idle_prompt"), 1100)
+    persist.save(p, a, 1150)
+
+    # Booted after the save: every session in the file is dead.
+    b = SessionStore()
+    assert persist.load(p, b, 1800, 86400.0, booted_at=1300) == 0
+    assert b.sessions == {}
+
+    # Booted before the save: only the daemon restarted, so they are live.
+    c = SessionStore()
+    assert persist.load(p, c, 1800, 86400.0, booted_at=500) == 1
+
+    # And an unknown boot time changes nothing.
+    d = SessionStore()
+    assert persist.load(p, d, 1800, 86400.0, booted_at=None) == 1
+
+
+def test_boot_time_is_plausible():
+    now = time.time()
+    booted = persist.boot_time(now)
+    if booted is not None:   # None is allowed on a platform it cannot read
+        assert now - 10 * 365 * 86400 < booted < now
 
 
 def test_statusline_figures_survive(tmp_path):

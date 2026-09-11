@@ -84,6 +84,13 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   clears an attention state only when its `agent_id` matches `attn_agent`, the
   one that raised the prompt; it refreshes the staleness timer either way,
   because a long subagent run is the only traffic its session produces.
+- Restored sessions are ghosts until proven otherwise. `persist.load()`
+  restores nothing if the machine booted after the file was saved, and
+  `tick()` drops any session silent for `ghost_after_s` (`restore_max_age_s`,
+  24 h) whatever its state. A Windows Update restart killed a session without
+  a `SessionEnd`, and before these two checks it stayed on the display for 45
+  hours. Keep both: the boot check misses Fast Startup, and the cutoff alone
+  shows a ghost for a day.
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
 - A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.

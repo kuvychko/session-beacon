@@ -123,6 +123,13 @@ class SessionStore:
     # the only thing standing between a wrong guess and a session nobody sees.
     look_s: float = 300.0
     ended_grace_s: float = 30.0
+    # A session with no hook event at all for this long is dropped, whatever its
+    # state. Nothing else ever removes one that never sent SessionEnd, and a
+    # window killed by a Windows Update restart never does: one such row sat on
+    # the display for 45 hours, surviving a daemon restart that restored it
+    # because it was 21 hours old, under the same 24-hour cutoff persist.load()
+    # applies. Applying it here too means a restart no longer renews a ghost.
+    ghost_after_s: float = 86400.0
     # How long an outstanding background count is believed without fresh
     # evidence. See where it expires, in tick().
     bg_quiet_s: float = 180.0
@@ -372,6 +379,12 @@ class SessionStore:
             if s.state == State.ENDED:
                 if now - s.state_since > self.ended_grace_s:
                     del self.sessions[sid]
+                continue
+            if now - s.last_event > self.ghost_after_s:
+                # Measured from the last event, not state_since: a WAITING row
+                # keeps its age across repeat notifications, and those repeats
+                # are exactly what proves a parked session is still alive.
+                del self.sessions[sid]
                 continue
 
             # The hold on a background count expires here, in one place, rather

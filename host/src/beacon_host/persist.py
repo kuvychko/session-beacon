@@ -22,7 +22,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -88,14 +90,44 @@ def save(path: str | Path, store: SessionStore, now: float) -> None:
         log.warning("could not save session state to %s (%s)", path, e)
 
 
+def boot_time(now: float | None = None) -> float | None:
+    """When the machine last booted, as a `time.time()` value, or None if unknown.
+
+    Uptime subtracted from now. On Windows `GetTickCount64` counts time spent
+    asleep, which is what this needs: sleep does not kill a session, and a boot
+    time that moved forward at every wake would discard live ones. Fast Startup
+    is the known miss -- its "shutdown" hibernates the kernel, so uptime carries
+    on even though every user process was killed -- and the running cutoff in
+    SessionStore.tick() is the backstop for it.
+    """
+    now = time.time() if now is None else now
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            tick = ctypes.windll.kernel32.GetTickCount64
+            tick.restype = ctypes.c_uint64
+            return now - tick() / 1000.0
+        with open("/proc/uptime", encoding="ascii") as f:
+            return now - float(f.read().split()[0])
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def load(path: str | Path, store: SessionStore, now: float,
-         max_age_s: float) -> int:
+         max_age_s: float, booted_at: float | None = None) -> int:
     """Restore sessions into `store`. Returns how many were restored.
 
     A session whose last event is older than `max_age_s` is dropped rather than
     restored: nothing tells the daemon that a window was closed while it was
     down, since SessionEnd would have gone nowhere, so an old row is more likely
-    a ghost than a session still waiting. Never raises.
+    a ghost than a session still waiting.
+
+    Nothing at all is restored if the machine booted after the file was saved.
+    No Claude Code process survives a reboot, so every session in it is dead,
+    and a restart kills them without a SessionEnd. Windows Update did exactly
+    that to a session that was then restored at logon and shown for 45 hours.
+    Never raises.
     """
     try:
         p = Path(path)
@@ -107,8 +139,18 @@ def load(path: str | Path, store: SessionStore, now: float,
                         p, data.get("v"), FORMAT_V)
             return 0
 
+        rows = data.get("sessions") or []
+        saved_at = data.get("saved_at")
+        if booted_at is not None and isinstance(saved_at, (int, float)) \
+                and saved_at < booted_at:
+            if rows:
+                log.info("not restoring %d session(s) from %s: the machine has "
+                         "restarted since they were saved, and no Claude Code "
+                         "session survives that", len(rows), p)
+            return 0
+
         restored = dropped = 0
-        for row in data.get("sessions") or []:
+        for row in rows:
             sid = row.get("session_id")
             if not sid or sid in store.sessions:
                 continue

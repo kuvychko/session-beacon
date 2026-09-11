@@ -384,8 +384,16 @@ Claude Code simply is not calling the hooks. Check `events_received` at
 If the display shows *fewer* sessions than you have open, that is a different
 fault and the hooks are not the cause. A session sitting on a prompt sends no
 events, so it is only known to the daemon from its saved state; check the `rows`
-field at `/health` against what is on screen. Sessions untouched for more than
-`restore_max_age_s` are deliberately not restored after a restart.
+field at `/health` against what is on screen. Some sessions are dropped on
+purpose: any session with no activity for `restore_max_age_s` (24 h), and, after
+the PC restarts, every session from before the restart, because none of them
+can have survived it.
+
+If the display shows a session you closed long ago, typically an amber row with
+an age in days, its window was killed without telling Claude Code to end the
+session. A Windows Update restart does this. The row goes by itself once it has
+been silent for 24 hours, and restarting the scheduled task clears it at once
+if the PC has rebooted since.
 
 If the footer says `no statusline data`, everything else is working but the
 statusline hook is not installed. That hook is the only source of cost and
