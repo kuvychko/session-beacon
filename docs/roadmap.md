@@ -39,13 +39,16 @@ Done:
   sorts below the working sessions. A permanent blink had two sessions lit for
   thirteen hours. See [the attention ladder](architecture.md#the-attention-ladder).
 - ~~Label overrides in config.~~ Keyed by repo root or exact directory.
+- ~~Act on a missing heartbeat.~~ **Done.** It was prompted by a display that froze
+  eight times in eight days while `/health` said `"device": true`. The cause was
+  the heartbeat's own `Serial.printf` waiting forever on a USB pipe that had
+  stopped draining. The firmware now queues its output and never waits, the loop
+  watchdog reboots the board if anything else hangs, and the host reports a port
+  that is open but silent as `silent`. See
+  [architecture.md](architecture.md#usb-writes-must-never-wait).
 
 Still open:
 
-- **Act on a missing heartbeat.** The device sends one every 3 s carrying its
-  receive, parse-failure and drop counters, and the daemon logs it at debug level
-  and nothing more. Using its absence to spot a wedged device is described in
-  `docs/protocol.md` as though it happens; it does not.
 - **Last tool name per row.** The host already records it and the protocol carries a
   `tool` field; nothing draws it. There is no room on a row without giving up label
   width, so it needs a layout decision rather than plumbing.

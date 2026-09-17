@@ -21,18 +21,23 @@ STATUS = {
 
 
 def test_compose_statusline():
-    out = compose(STATUS, device_ok=True)
+    out = compose(STATUS, "ok")
     assert "Claude Opus 5" in out and "session-beacon" in out
     assert "ctx 62%" in out and "$1.23" in out and out.endswith("beacon")
 
 
 def test_compose_marks_missing_device():
-    assert compose(STATUS, device_ok=False).endswith("beacon?")
+    assert compose(STATUS, "absent").endswith("beacon?")
+
+
+def test_compose_marks_a_stuck_device():
+    """A frozen panel cannot report itself, so the terminal has to say it."""
+    assert compose(STATUS, "silent").endswith("beacon stuck: replug")
 
 
 def test_compose_survives_garbage():
-    assert compose({}, True) == "beacon"
-    assert compose({"model": "not-a-dict"}, True) == ""
+    assert compose({}, "ok") == "beacon"
+    assert compose({"model": "not-a-dict"}, "ok") == ""
 
 
 def test_config_defaults_and_missing_file():
@@ -77,7 +82,7 @@ def test_http_event_and_status_roundtrip():
     """An /event reply must be empty: Claude Code feeds some hook stdout back."""
     q = queue.Queue()
     srv = hook_server.start(q, port=47455)
-    hook_server.set_device_ok(True)
+    hook_server.set_device("ok")
     try:
         status, body = _post(47455, "/event",
                              {"hook_event_name": "Stop", "session_id": "s1",
@@ -163,7 +168,7 @@ def test_health_reports_event_count():
     q = queue.Queue()
     srv = hook_server.start(q, port=47457)
     try:
-        hook_server.set_device_ok(True)
+        hook_server.set_device("ok")
         hook_server.set_stats(sessions=0, events_received=0, last_event_age_s=None)
         with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
             h = json.loads(r.read())
@@ -173,6 +178,14 @@ def test_health_reports_event_count():
         with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
             h = json.loads(r.read())
         assert h["events_received"] == 17 and h["sessions"] == 2
+
+        # An open port on a board that has stopped is not a device.
+        hb = {"fw": "0.2.0", "up": 3600, "rx": 142, "age_s": 16.2}
+        hook_server.set_device("silent", hb)
+        with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
+            h = json.loads(r.read())
+        assert h["device"] is False and h["device_state"] == "silent"
+        assert h["heartbeat"] == hb
 
         # And the background bookkeeping, which is why a row is *not* red.
         bg = [{"id": "835a20d6", "l": "inventory-servic", "tasks": 1,

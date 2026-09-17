@@ -253,6 +253,14 @@ the difference between "the hooks are broken" and "the USB cable is out". It is
 worth having in the terminal because the failure it reports is the one you cannot
 diagnose by looking at the beacon.
 
+`beacon stuck: replug` is the daemon saying the port is open but the board has
+sent no heartbeat for 15 seconds. The display then holds its last frame, which
+looks exactly like a calm desk. Firmware 0.2.0 reboots itself out of a hang, so
+on that version this should last only a few seconds. If it persists, replug the
+board. If it keeps coming back, turn off USB selective suspend for the port, the
+likely trigger: in Device Manager, clear "Allow the computer to turn off this
+device to save power" on the USB Serial Device and on its hub.
+
 That shot also happens to show the null-context case: there is no `ctx` segment
 because `used_percentage` is null early in a session and after a compaction, and
 the token fallback had nothing to work from either. A missing `ctx` is not a

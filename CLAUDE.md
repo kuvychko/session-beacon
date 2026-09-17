@@ -33,6 +33,19 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   at fixed positions with `setTextColor(fg, bg)` so glyphs overwrite themselves. Software
   SPI is slow enough that clear-then-draw is a visible flash on every update.
 - In firmware, never write `now - then >= TIMEOUT` on `millis()` values. Use `elapsed(now, since, ms)`. Unsigned subtraction underflows to ~4.3 billion when the stored stamp is ahead of `now`, which fires every timeout at once; it also breaks on the 49-day rollover. This caused the display to alternate with "no host" once a second.
+- In firmware, never call `Serial.print*`/`Serial.write` directly. Use `txLine()`.
+  `Serial` is TinyUSB `USBCDC`, whose `write()` waits with no timeout until a
+  64-byte FIFO has room, and `setTxTimeoutMs` does not bound that. A USB port
+  that stopped draining hung the heartbeat's `printf` and froze the display
+  until a power cycle, eight times in eight days. `txPump()` writes only what
+  `availableForWrite()` allows; do not "simplify" it into a length check on
+  the whole line, which is never true for a 110-byte heartbeat. Gate on
+  `hostAttached()` (DTR), never `if (Serial)`: that flag stayed false for the
+  daemon's connection and silenced every heartbeat.
+- `enableLoopWDT()` in `setup()` stays. Without it any hang in `loop()` is
+  permanent and invisible, because the ST7735 keeps its last frame. So nothing
+  in `loop()` may block for seconds (5 s reboots the board). `hang` over serial
+  tests it.
 - `loop()` drains serial *before* taking `now`. Parsing repaints the screen and stamps `lastMsgMs` afterwards, so a `now` taken earlier would be in the past.
 - The hook forwarder must never block or fail loudly. Any error means exit 0 with nothing on stdout (except in `--statusline` mode, where it must still print a status line).
 - Host state logic lives in `state.py` and is pure (no I/O) so it can be unit tested with fixtures.
@@ -94,6 +107,11 @@ docs/                        architecture, hardware, enclosure, protocol, claude
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
 - A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.
+- `/health`'s `device` means a heartbeat arrived within 15 s, not that the port
+  is open (`SerialLink.connected`). A hung board stays enumerated and accepts
+  writes, so the open port read `"device": true` through a 7-hour freeze.
+  `device_state` is `ok`/`absent`/`silent`, and the host never tries to cure
+  `silent` by reopening the port, because that was shown not to work.
 - Anything that installs outside the repo must be removable by `scripts/uninstall.ps1`. It stops the daemon, drops the Scheduled Task, strips the hooks and clears the logs, and it must stay idempotent and leave user-authored things alone. `install-hooks.ps1` takes `-SettingsPath` so the round trip can be tested against a throwaway file.
 - Neither install script writes or backs up settings.json when nothing would change, or repeat runs litter the directory with backups.
 
@@ -111,7 +129,7 @@ uv run beacon-host --port COM4 -v    # drive the display
 From the repository root, not `host/`:
 
 ```powershell
-curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device
+curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device, heartbeat
 ./scripts/install-hooks.ps1          # Claude Code hooks; -Uninstall to remove
 ./scripts/install-task.ps1           # run at logon; -Uninstall to remove
 ./scripts/uninstall.ps1 -WhatIf      # undo everything; supports -WhatIf

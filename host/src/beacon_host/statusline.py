@@ -2,7 +2,7 @@
 
 This runs in the HTTP handler thread and is a pure function of the payload it
 was just handed, so it needs no shared state and no locking. The only outside
-fact it uses is whether the device is currently connected, passed in.
+fact it uses is the device state from serial_link, passed in.
 
 Keeping this on the daemon side is what lets the statusline hook be a plain
 curl call: curl POSTs the payload and prints the response body verbatim.
@@ -19,7 +19,16 @@ from .state import extract_ctx_pct
 log = logging.getLogger(__name__)
 
 
-def compose(st: dict[str, Any], device_ok: bool) -> str:
+MARKERS = {
+    "ok": "beacon",
+    "absent": "beacon?",
+    # A frozen panel cannot say it is frozen, so this is the only place a user
+    # will find out, and the only cure is on their desk.
+    "silent": "beacon stuck: replug",
+}
+
+
+def compose(st: dict[str, Any], device_state: str) -> str:
     """Build a one-line status string. Never raises; returns "" on bad input."""
     try:
         parts: list[str] = []
@@ -44,7 +53,7 @@ def compose(st: dict[str, Any], device_ok: bool) -> str:
 
         # A quiet marker, so a dead daemon or unplugged device is visible in
         # the terminal without going to look at the beacon itself.
-        parts.append("beacon" if device_ok else "beacon?")
+        parts.append(MARKERS.get(device_state, "beacon?"))
 
         return "  ".join(parts)
     except Exception as e:  # noqa: BLE001

@@ -28,7 +28,11 @@ MAX_BODY = 1 << 20  # 1 MiB; statusline payloads are small, cap the rest
 
 class _Handler(BaseHTTPRequestHandler):
     q: queue.Queue                       # set by start()
-    device_ok: bool = False              # updated by the main loop, read here
+    # Updated by the main loop, read here: "ok", "absent" or "silent", as
+    # defined in serial_link. "silent" is a board whose firmware has stopped
+    # while its port stays open.
+    device_state: str = "absent"
+    heartbeat: dict | None = None        # the last heartbeat's counters
     # Deliberately shared across every request: the main loop swaps the whole
     # dict, so readers see one consistent snapshot without locking.
     stats: ClassVar[dict] = {}
@@ -65,7 +69,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.q.put_nowait((kind, payload))
 
         if kind == "status":
-            text = compose(payload, type(self).device_ok) if isinstance(payload, dict) else ""
+            text = compose(payload, type(self).device_state) if isinstance(payload, dict) else ""
             self._send(200, text.encode("utf-8", "replace"))
         else:
             self._send(204)
@@ -77,8 +81,14 @@ class _Handler(BaseHTTPRequestHandler):
         # events_received is the field that matters when nothing shows on the
         # display: zero means Claude Code is not calling the hooks at all,
         # which is a settings problem, not a daemon or wiring problem.
+        #
+        # `device` means the board answered recently, not that its port is open.
+        # A hung board keeps both its port and its last frame, and reporting the
+        # port had /health say "device": true through a seven-hour freeze.
         cls = type(self)
-        body = json.dumps({"ok": True, "device": cls.device_ok, **cls.stats}).encode()
+        body = json.dumps({"ok": True, "device": cls.device_state == "ok",
+                           "device_state": cls.device_state,
+                           "heartbeat": cls.heartbeat, **cls.stats}).encode()
         self._send(200, body, "application/json")
 
     def log_message(self, *args) -> None:  # silence default stderr logging
@@ -111,9 +121,10 @@ def start(q: queue.Queue, host: str = HOST, port: int = PORT) -> ThreadingHTTPSe
     return srv
 
 
-def set_device_ok(ok: bool) -> None:
-    """Called from the main loop. A plain attribute write, atomic under the GIL."""
-    _Handler.device_ok = ok
+def set_device(state: str, heartbeat: dict | None = None) -> None:
+    """Called from the main loop. Plain attribute writes, atomic under the GIL."""
+    _Handler.device_state = state
+    _Handler.heartbeat = heartbeat
 
 
 def set_stats(**kwargs) -> None:

@@ -58,9 +58,9 @@ Backlight brightness 0 to 100. Ignored until BL is wired to a PWM pin.
 ## Device to host (optional)
 
 ```json
-{"t":"hb","fw":"0.1.0","up":3600,"rx":142,"bad":0,"drop":0,"since":412,"render":28,"spi":"hw"}
+{"t":"hb","fw":"0.2.0","up":3600,"rx":142,"bad":0,"drop":0,"txdrop":0,"since":412,"render":28,"spi":"hw","rst":"power"}
 ```
-Heartbeat every 3 s.
+Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0, and the host treats both as optional.
 
 | Field | Meaning |
 |-------|---------|
@@ -69,11 +69,17 @@ Heartbeat every 3 s.
 | `rx` | Lines accepted |
 | `bad` | Lines that failed to parse |
 | `drop` | Lines discarded for exceeding the buffer |
+| `txdrop` | Outgoing lines dropped because the USB pipe was not draining while a host held the port |
 | `since` | Milliseconds since the last accepted message |
 | `render` | Duration of the most recent repaint, ms |
 | `spi` | `hw` or `sw`, which SPI path is compiled in |
+| `rst` | Why the board last reset: `power`, `sw`, `panic`, `int_wdt`, `task_wdt`, `wdt`, `brownout` or `other`. A watchdog reset or `panic` means the watchdog rescued a hung `loop()`. |
 
-These exist because a quiet host and a device that is dropping or failing to parse lines look identical from the outside: a screen reading "no host". The host currently logs the line at debug level and nothing more. Using its absence to detect a wedged device is not implemented; see [roadmap.md](roadmap.md).
+These exist because a quiet host and a device that is dropping or failing to parse lines look identical from the outside: a screen reading "no host".
+
+The host acts on the heartbeat as well as logging it. If the port is open and no heartbeat has arrived for 15 s, counting from the later of the port opening and the last heartbeat, the device state is `silent`. `/health` then reports `"device": false`, the status line says `beacon stuck: replug`, and the daemon logs one warning. That is a board whose sketch has stopped: it stays enumerated and accepts writes, so the port alone cannot tell. If `up` goes down between heartbeats, even across a reconnect, the host logs a reboot and its `rst`.
+
+The device never blocks to send a heartbeat. If the pipe is not draining, lines are dropped and counted in `txdrop`.
 
 ## Rules
 

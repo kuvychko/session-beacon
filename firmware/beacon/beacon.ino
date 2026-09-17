@@ -12,9 +12,12 @@
 //
 //   demo   load a canned snapshot and animate it
 //   live   leave demo mode
+//   hang   stop loop() on purpose, to check the watchdog reboots the board
 //   ?      command list
 
 #include <SPI.h>
+#include <esp_system.h>
+#include "tusb.h"   // tud_cdc_n_connected(); Serial is TinyUSB CDC on this board
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 #include <ArduinoJson.h>
@@ -71,7 +74,7 @@ static void applyPanelColorOrder() {
 }
 
 // ---- Constants ----
-static constexpr const char* FW_VERSION = "0.1.0";
+static constexpr const char* FW_VERSION = "0.2.0";
 static constexpr uint8_t  PROTOCOL_V    = 1;
 static constexpr uint32_t BAUD          = 115200;
 static constexpr size_t   LINE_BUF      = 1024;
@@ -224,6 +227,75 @@ bool demoMode = false;
 uint32_t rxLines = 0;    // complete lines seen
 uint32_t rxBad = 0;      // lines that failed to parse as JSON
 uint32_t rxDropped = 0;  // lines abandoned for exceeding the buffer
+
+// ---- Outbound serial ----
+//
+// Nothing in this sketch may call Serial.print*() or Serial.write() directly.
+// On this core Serial is TinyUSB's USBCDC, whose write() loops until every byte
+// is in a 64-byte FIFO and has no timeout: setTxTimeoutMs() bounds only the
+// lock, not the wait. If the PC stops collecting while DTR is still asserted,
+// as a suspended USB port does, the write spins forever and loop() with it. The
+// panel keeps its last frame, so the board looked alive but frozen for hours,
+// eight times in eight days, until someone power-cycled it.
+//
+// So lines are queued here and txPump() hands the USB stack only as many bytes
+// as it has room for. A stalled pipe fills the queue, and further lines are
+// dropped whole and counted in the heartbeat's `txdrop`, rather than blocking.
+static constexpr size_t TX_BUF = 512;
+char txBuf[TX_BUF];
+size_t txHead = 0;       // next byte to send
+size_t txTail = 0;       // one past the last queued byte
+uint32_t txDropped = 0;  // lines lost to a stalled pipe with a host attached
+
+// Whether a host holds the port (DTR asserted). This is the check write() itself
+// makes. Do not use `if (Serial)` instead: that reads a separate flag which a
+// DTR/RTS pattern detector updates only in its idle state, and it stayed false
+// for the daemon's connection, so every heartbeat was discarded and the host
+// reported a healthy board as stuck.
+static bool hostAttached() { return tud_cdc_n_connected(0); }
+
+static void txLine(const char* s) {
+  // No host holding the port: nothing will read it, and counting these would
+  // drown the stalls `txdrop` exists to report.
+  if (!hostAttached()) return;
+  const size_t n = strlen(s);
+  if (txHead == txTail) txHead = txTail = 0;
+  if (TX_BUF - txTail < n + 1 && txHead > 0) {
+    memmove(txBuf, txBuf + txHead, txTail - txHead);
+    txTail -= txHead;
+    txHead = 0;
+  }
+  if (TX_BUF - txTail < n + 1) { txDropped++; return; }  // whole or not at all
+  memcpy(txBuf + txTail, s, n);
+  txTail += n;
+  txBuf[txTail++] = '\n';
+}
+
+static void txPump() {
+  if (txHead == txTail) return;
+  if (!hostAttached()) { txHead = txTail = 0; return; }
+  const int room = Serial.availableForWrite();
+  if (room <= 0) return;
+  size_t n = txTail - txHead;
+  if (n > (size_t)room) n = (size_t)room;
+  // Never more than the free space, so write() cannot reach its waiting loop.
+  txHead += Serial.write((const uint8_t*)(txBuf + txHead), n);
+}
+
+// Why this boot happened, for the heartbeat. A `task_wdt` or `panic` here is
+// the watchdog below having rescued a hung loop().
+static const char* resetReason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "power";
+    case ESP_RST_SW:       return "sw";
+    case ESP_RST_PANIC:    return "panic";
+    case ESP_RST_INT_WDT:  return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT:      return "wdt";
+    case ESP_RST_BROWNOUT: return "brownout";
+    default:               return "other";
+  }
+}
 
 // ---- Helpers ----
 static uint16_t stateColor(const char* st) {
@@ -694,16 +766,24 @@ static void demoLoad() {
   snap = d;
   demoMode = true;
   render();
-  Serial.println("demo mode on. 'live' to leave.");
+  txLine("demo mode on. 'live' to leave.");
 }
 
 static void help() {
-  Serial.println("send a JSON snapshot line, or: demo | live | ?");
+  txLine("send a JSON snapshot line, or: demo | live | hang | ?");
 }
 
 static void handleCommand(const char* cmd) {
   if (!strcmp(cmd, "demo"))      demoLoad();
-  else if (!strcmp(cmd, "live")) { demoMode = false; Serial.println("demo mode off"); }
+  else if (!strcmp(cmd, "live")) { demoMode = false; txLine("demo mode off"); }
+  else if (!strcmp(cmd, "hang")) {
+    // Bench test for the watchdog: the board should reboot within about five
+    // seconds, and the next heartbeat should report `rst` as a watchdog reset.
+    txLine("hanging; the watchdog should reboot this board");
+    const uint32_t t0 = millis();
+    while (!elapsed(millis(), t0, 200)) txPump();  // let the reply out first
+    for (;;) {}
+  }
   else                           help();
 }
 
@@ -719,6 +799,13 @@ void setup() {
   applyPanelColorOrder();  // must follow setRotation, see note above
   drawNoHost();
   showingNoHost = true;
+
+  // Without this a hung loop() is permanent: the ST7735 keeps its last frame
+  // with no help from the MCU, so a dead sketch looks like a calm desk. With it
+  // the core feeds the task watchdog before every loop(), and a hang becomes a
+  // reboot after 5 s that the host treats as an ordinary reconnect. Nothing in
+  // loop() may therefore block for seconds; a render costs about 65 ms.
+  enableLoopWDT();
 }
 
 void loop() {
@@ -785,16 +872,21 @@ void loop() {
     lastHbMs = now;
     int32_t since = (int32_t)(now - lastMsgMs);
     if (since < 0) since = 0;
-    Serial.printf("{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\"}\n",
-                  FW_VERSION, (unsigned long)(now / 1000),
-                  (unsigned long)rxLines, (unsigned long)rxBad,
-                  (unsigned long)rxDropped, (long)since,
-                  (unsigned long)lastRenderMs,
+    char hb[224];
+    snprintf(hb, sizeof hb,
+             "{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
+             FW_VERSION, (unsigned long)(now / 1000),
+             (unsigned long)rxLines, (unsigned long)rxBad,
+             (unsigned long)rxDropped, (unsigned long)txDropped, (long)since,
+             (unsigned long)lastRenderMs,
 #if USE_HARDWARE_SPI
-                  "hw"
+             "hw",
 #else
-                  "sw"
+             "sw",
 #endif
-                  );
+             resetReason());
+    txLine(hb);
   }
+
+  txPump();
 }

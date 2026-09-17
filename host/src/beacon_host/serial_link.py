@@ -4,6 +4,12 @@ The device disappears and comes back on every reflash, and Windows can move
 the COM number if the cable changes port, so this never assumes the link is
 up. Every send is best-effort and a failure just closes the port for the next
 reconnect attempt.
+
+An open port is not a working device. A board whose sketch has hung stays
+enumerated, and Windows accepts writes to it without complaint for as long as
+anyone cares to send them, so the only evidence of life is the heartbeat the
+firmware sends every 3 s. `DeviceHealth` turns that into the device state the
+daemon reports.
 """
 
 from __future__ import annotations
@@ -23,6 +29,15 @@ NANO_ESP32_VID = 0x2341
 NANO_ESP32_PID = 0x0070
 BAUD = 115200
 RECONNECT_S = 2.0
+# Five missed heartbeats. Long enough to ride out a slow USB moment, short
+# enough that a frozen display is reported while someone is still looking.
+HB_TIMEOUT_S = 15.0
+RX_MAX = 8192  # a device that never sends a newline cannot grow this forever
+
+# The device states reported by /health and the statusline.
+OK = "ok"          # port open and the board has sent a heartbeat recently
+ABSENT = "absent"  # no port: unplugged, rebooting, or held by another program
+SILENT = "silent"  # port open but no heartbeat: the firmware has stopped
 
 
 def find_port() -> str | None:
@@ -33,15 +48,97 @@ def find_port() -> str | None:
     return None
 
 
+class DeviceHealth:
+    """What the heartbeats say about the board. Pure: the caller passes the clock.
+
+    The last heartbeat is kept across reconnects on purpose. A watchdog reboot
+    drops the port, so the only way to see that one happened is to compare the
+    board's uptime before and after.
+    """
+
+    def __init__(self, timeout_s: float = HB_TIMEOUT_S) -> None:
+        self.timeout_s = timeout_s
+        self.port = ""
+        self.opened_at: float | None = None
+        self.last_hb: dict[str, Any] | None = None
+        self.last_hb_at: float | None = None
+        self._silent = False
+
+    def on_open(self, port: str, now: float) -> None:
+        # Grace period: a board that has just been opened is given a full
+        # timeout to send its first heartbeat before it is called silent.
+        self.port = port
+        self.opened_at = now
+
+    def on_line(self, line: str, now: float) -> bool:
+        """Record a heartbeat. Returns False for anything that is not one."""
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return False
+        if not isinstance(msg, dict) or msg.get("t") != "hb":
+            return False
+
+        prev = self.last_hb
+        up, prev_up = msg.get("up"), (prev or {}).get("up")
+        if isinstance(up, int) and isinstance(prev_up, int) and up < prev_up:
+            log.warning("beacon rebooted after %ds up (reset reason: %s)",
+                        prev_up, msg.get("rst", "unknown"))
+        self.last_hb = msg
+        self.last_hb_at = now
+        return True
+
+    def state(self, now: float, port_open: bool) -> str:
+        if not port_open:
+            return ABSENT
+        # The later of the open and the last heartbeat, so a heartbeat left
+        # over from before a reconnect cannot make a fresh port look silent.
+        heard = max((t for t in (self.opened_at, self.last_hb_at) if t is not None),
+                    default=now)
+        return OK if now - heard < self.timeout_s else SILENT
+
+    def check(self, now: float, port_open: bool) -> str:
+        """`state`, plus a log line when the board stops or resumes answering."""
+        st = self.state(now, port_open)
+        if st == SILENT and not self._silent:
+            self._silent = True
+            hb = self.last_hb or {}
+            log.warning(
+                "beacon on %s has sent no heartbeat for %ds with the port open "
+                "(last: fw %s, up %ss, rx %s). The firmware has stopped and the "
+                "display is frozen; replug the board.",
+                self.port or "?", int(self.timeout_s), hb.get("fw", "?"),
+                hb.get("up", "?"), hb.get("rx", "?"))
+        elif st == OK and self._silent:
+            self._silent = False
+            log.info("beacon on %s is answering again", self.port or "?")
+        elif st == ABSENT:
+            # Replugging is the cure for silence, so a disconnect ends the episode.
+            self._silent = False
+        return st
+
+    def report(self, now: float) -> dict[str, Any] | None:
+        """The last heartbeat's counters, for /health."""
+        if self.last_hb is None or self.last_hb_at is None:
+            return None
+        keys = ("fw", "up", "rx", "bad", "drop", "txdrop", "rst")
+        out = {k: self.last_hb[k] for k in keys if k in self.last_hb}
+        out["age_s"] = round(now - self.last_hb_at, 1)
+        return out
+
+
 class SerialLink:
     def __init__(self, port: str | None = None) -> None:
         self._port = port
         self._ser: serial.Serial | None = None
         self._next_try = 0.0
         self._warned = False
+        self._rx = bytearray()
+        self.health = DeviceHealth()
 
     @property
     def connected(self) -> bool:
+        """The port is open. Says nothing about whether the board is running."""
         return bool(self._ser and self._ser.is_open)
 
     def ensure_open(self) -> bool:
@@ -70,6 +167,8 @@ class SerialLink:
 
         log.info("connected to beacon on %s", port)
         self._warned = False
+        self._rx.clear()
+        self.health.on_open(port, time.monotonic())
         self.send({"t": "hello", "v": 1, "host": socket.gethostname()})
         return True
 
@@ -85,18 +184,40 @@ class SerialLink:
             self.close()
             return False
 
-    def read_lines(self) -> list[str]:
-        """Drain device-to-host lines such as heartbeats. Non-blocking."""
-        if not self.connected:
-            return []
-        try:
-            data = self._ser.read(4096)  # type: ignore[union-attr]
-        except (serial.SerialException, OSError):
-            self.close()
-            return []
-        if not data:
-            return []
-        return [ln for ln in data.decode(errors="replace").splitlines() if ln.strip()]
+    def poll(self, now: float | None = None) -> list[str]:
+        """Drain device-to-host lines, feed heartbeats to `health`. Non-blocking.
+
+        Returns the complete lines read. A line split across two reads is held
+        until its newline arrives rather than parsed as two broken halves.
+        """
+        now = time.monotonic() if now is None else now
+        lines: list[str] = []
+        if self.connected:
+            try:
+                data = self._ser.read(4096)  # type: ignore[union-attr]
+            except (serial.SerialException, OSError):
+                self.close()
+                data = b""
+            if data:
+                self._rx += data
+                *complete, rest = self._rx.split(b"\n")
+                self._rx = bytearray(rest[-RX_MAX:])
+                for raw in complete:
+                    ln = raw.decode(errors="replace").strip()
+                    if not ln:
+                        continue
+                    log.debug("device: %s", ln)
+                    self.health.on_line(ln, now)
+                    lines.append(ln)
+        self.health.check(now, self.connected)
+        return lines
+
+    def device_state(self, now: float | None = None) -> str:
+        now = time.monotonic() if now is None else now
+        return self.health.state(now, self.connected)
+
+    def heartbeat_report(self, now: float | None = None) -> dict[str, Any] | None:
+        return self.health.report(time.monotonic() if now is None else now)
 
     def close(self) -> None:
         if self._ser:

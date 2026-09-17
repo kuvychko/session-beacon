@@ -152,7 +152,7 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
                      booted_at=persist.boot_time())
 
     link = None if dry_run else SerialLink(cfg.port)
-    hook_server.set_device_ok(bool(dry_run))
+    hook_server.set_device("ok" if dry_run else "absent")
 
     capture = Capture(capture_path) if capture_path else None
     if capture:
@@ -197,6 +197,13 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
                     "your Claude Code sessions so the hooks load.",
                     int(now - started))
 
+            # Every tick, not only when a snapshot goes out: the heartbeats are
+            # the only proof the board is still running, and reporting that
+            # should not wait on the next push.
+            if link is not None:
+                link.poll()
+                hook_server.set_device(link.device_state(), link.heartbeat_report())
+
             store.tick(now)
             snap = store.snapshot(now)
             # Compare without the timestamp so a quiet minute is not a redraw.
@@ -207,9 +214,6 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
                     print(json.dumps(snap, separators=(",", ":")), flush=True)
                 else:
                     link.send(snap)
-                    for ln in link.read_lines():
-                        log.debug("device: %s", ln)
-                    hook_server.set_device_ok(link.connected)
                 hook_server.set_stats(
                     sessions=len(store.sessions),
                     events_received=events_received,
