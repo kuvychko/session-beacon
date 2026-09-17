@@ -103,14 +103,37 @@ def test_other_lines_are_not_heartbeats():
 
 def test_report_carries_the_counters_and_their_age():
     h = DeviceHealth()
-    h.on_line(hb(36, rx=2, txdrop=3), 10.0)
+    h.on_line(hb(36, rx=2, txdrop=3, aflip=1, wedge=0), 10.0)
     assert h.report(12.34) == {"fw": "0.2.0", "up": 36, "rx": 2, "bad": 0,
-                               "drop": 0, "txdrop": 3, "rst": "power",
-                               "age_s": 2.3}
+                               "drop": 0, "txdrop": 3, "aflip": 1, "wedge": 0,
+                               "rst": "power", "age_s": 2.3}
+
+
+def test_a_recovered_return_path_is_reported_once(caplog):
+    """The board cures a dead return path by rebooting, so `wedge` rising is
+    all anyone gets: by the time the count arrives the episode is over, and
+    the display never stopped rendering while it lasted."""
+    h = DeviceHealth()
+    with caplog.at_level(logging.WARNING):
+        h.on_line(hb(900, wedge=0), 0.0)
+        assert not caplog.records
+        h.on_line(hb(2, wedge=1), 40.0)   # fresh boot, one cure behind it
+        msgs = [r.getMessage() for r in caplog.records]
+    assert any("return path" in m and "1 time(s)" in m for m in msgs)
+    assert any("rebooted after 900s up" in m for m in msgs)
+
+
+def test_an_unchanged_wedge_count_says_nothing(caplog):
+    """It is kept across reboots, so only a rise is news."""
+    h = DeviceHealth()
+    with caplog.at_level(logging.WARNING):
+        h.on_line(hb(10, wedge=4), 0.0)
+        h.on_line(hb(13, wedge=4), 3.0)
+    assert not [r for r in caplog.records if "return path" in r.getMessage()]
 
 
 def test_report_tolerates_an_older_firmware():
-    """0.1.0 sends no txdrop or rst; the report just leaves them out."""
+    """0.1.0 sends no txdrop, aflip, wedge or rst; the report leaves them out."""
     h = DeviceHealth()
     h.on_line('{"t":"hb","fw":"0.1.0","up":3,"rx":0,"bad":0,"drop":0}', 0.0)
     assert h.report(0.0) == {"fw": "0.1.0", "up": 3, "rx": 0, "bad": 0,

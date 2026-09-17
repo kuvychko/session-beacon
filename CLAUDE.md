@@ -40,8 +40,25 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   until a power cycle, eight times in eight days. `txPump()` writes only what
   `availableForWrite()` allows; do not "simplify" it into a length check on
   the whole line, which is never true for a 110-byte heartbeat. Gate on
-  `hostAttached()` (DTR), never `if (Serial)`: that flag stayed false for the
+  `hostAttached()`, never `if (Serial)`: that flag stayed false for the
   daemon's connection and silenced every heartbeat.
+- `hostAttached()` is not evidence the board is alive, and cannot be made into
+  it. It is `tud_mounted() && !tud_suspended() && DTR`, and it read false for
+  two hours on a link that was still delivering snapshots the board rendered
+  perfectly, because nothing on the RX side is gated on it. Do not answer that
+  by deleting the checks in `txLine()`/`txPump()`: `USBCDC::write()` and
+  `availableForWrite()` test the same flag and return 0 while it is false, so
+  that changes nothing. `txWatchdog()` is the cure -- receiving a snapshot
+  while the flag says no host is a contradiction, and after `TX_WEDGE_MS` it
+  reboots the board to re-enumerate. Keep the `NO_HOST_MS` staleness check in
+  it: without that a board on a charger reboots itself every 30 seconds.
+- Nothing on the host may toggle DTR or RTS to revive a silent board. The core
+  watches those two lines for a four-step pattern and restarts the chip into
+  its bootloader when it sees it. Reopening the port was separately shown not
+  to work. The device cures itself; the host only reports.
+- `wedgeCures` is `RTC_DATA_ATTR` because the reboot that increments it would
+  otherwise erase the only record that it happened. Same for the heartbeat's
+  `wedge`: by the time anyone reads it the episode is long over.
 - `enableLoopWDT()` in `setup()` stays. Without it any hang in `loop()` is
   permanent and invisible, because the ST7735 keeps its last frame. So nothing
   in `loop()` may block for seconds (5 s reboots the board). `hang` over serial
@@ -112,6 +129,12 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   writes, so the open port read `"device": true` through a 7-hour freeze.
   `device_state` is `ok`/`absent`/`silent`, and the host never tries to cure
   `silent` by reopening the port, because that was shown not to work.
+- `silent` says a board has stopped answering and nothing more. It is not a
+  frozen display: a dead return path looks identical from here and leaves the
+  panel drawing every frame. Do not put "frozen" or "replug" back into the
+  status line, the logs or the docs -- `beacon stuck: replug` was shown for two
+  hours against a beacon whose counters were visibly advancing, which is the
+  issue this wording came from.
 - Anything that installs outside the repo must be removable by `scripts/uninstall.ps1`. It stops the daemon, drops the Scheduled Task, strips the hooks and clears the logs, and it must stay idempotent and leave user-authored things alone. `install-hooks.ps1` takes `-SettingsPath` so the round trip can be tested against a throwaway file.
 - Neither install script writes or backs up settings.json when nothing would change, or repeat runs litter the directory with backups.
 

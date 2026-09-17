@@ -10,6 +10,12 @@ enumerated, and Windows accepts writes to it without complaint for as long as
 anyone cares to send them, so the only evidence of life is the heartbeat the
 firmware sends every 3 s. `DeviceHealth` turns that into the device state the
 daemon reports.
+
+A missing heartbeat is not proof of a frozen display, though this file used to
+say it was. The device's return path can die on its own -- see txWatchdog() in
+the firmware -- leaving a board that renders every snapshot it is sent and says
+nothing back. Nothing on this side can tell the two apart, so the wording here
+and in the status line commits to neither, and the cure lives in the firmware.
 """
 
 from __future__ import annotations
@@ -30,14 +36,15 @@ NANO_ESP32_PID = 0x0070
 BAUD = 115200
 RECONNECT_S = 2.0
 # Five missed heartbeats. Long enough to ride out a slow USB moment, short
-# enough that a frozen display is reported while someone is still looking.
+# enough that a board which has stopped answering is reported while someone is
+# still looking.
 HB_TIMEOUT_S = 15.0
 RX_MAX = 8192  # a device that never sends a newline cannot grow this forever
 
 # The device states reported by /health and the statusline.
 OK = "ok"          # port open and the board has sent a heartbeat recently
 ABSENT = "absent"  # no port: unplugged, rebooting, or held by another program
-SILENT = "silent"  # port open but no heartbeat: the firmware has stopped
+SILENT = "silent"  # port open but no heartbeat: see the note at the top
 
 
 def find_port() -> str | None:
@@ -84,6 +91,16 @@ class DeviceHealth:
         if isinstance(up, int) and isinstance(prev_up, int) and up < prev_up:
             log.warning("beacon rebooted after %ds up (reset reason: %s)",
                         prev_up, msg.get("rst", "unknown"))
+        # `wedge` counts the firmware's own cures for a dead return path and is
+        # kept across the reboot that performs one, so a rise here is the only
+        # report anyone gets that an episode happened at all: the board was
+        # rendering the whole time, and by now it is answering again.
+        w, prev_w = msg.get("wedge"), (prev or {}).get("wedge")
+        if isinstance(w, int) and isinstance(prev_w, int) and w > prev_w:
+            log.warning("beacon rebooted itself to recover its serial return "
+                        "path (%d time(s) so far). The display was never "
+                        "frozen. If this repeats, turn off USB selective "
+                        "suspend for the port.", w)
         self.last_hb = msg
         self.last_hb_at = now
         return True
@@ -105,8 +122,11 @@ class DeviceHealth:
             hb = self.last_hb or {}
             log.warning(
                 "beacon on %s has sent no heartbeat for %ds with the port open "
-                "(last: fw %s, up %ss, rx %s). The firmware has stopped and the "
-                "display is frozen; replug the board.",
+                "(last: fw %s, up %ss, rx %s). Either the firmware has stopped, "
+                "or only its return path has and the display is still fine; "
+                "from here the two are identical. Firmware 0.2.1 reboots itself "
+                "out of both within a minute. On an older one, or if this "
+                "persists, replug the board.",
                 self.port or "?", int(self.timeout_s), hb.get("fw", "?"),
                 hb.get("up", "?"), hb.get("rx", "?"))
         elif st == OK and self._silent:
@@ -121,7 +141,7 @@ class DeviceHealth:
         """The last heartbeat's counters, for /health."""
         if self.last_hb is None or self.last_hb_at is None:
             return None
-        keys = ("fw", "up", "rx", "bad", "drop", "txdrop", "rst")
+        keys = ("fw", "up", "rx", "bad", "drop", "txdrop", "aflip", "wedge", "rst")
         out = {k: self.last_hb[k] for k in keys if k in self.last_hb}
         out["age_s"] = round(now - self.last_hb_at, 1)
         return out

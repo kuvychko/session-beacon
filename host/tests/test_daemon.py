@@ -30,9 +30,16 @@ def test_compose_marks_missing_device():
     assert compose(STATUS, "absent").endswith("beacon?")
 
 
-def test_compose_marks_a_stuck_device():
-    """A frozen panel cannot report itself, so the terminal has to say it."""
-    assert compose(STATUS, "silent").endswith("beacon stuck: replug")
+def test_compose_marks_a_silent_device():
+    """A board that has stopped answering cannot report itself, so this does.
+
+    It says only that, and not that the panel is frozen or that a replug is
+    needed: a dead return path leaves the display working perfectly, and this
+    marker was shown against a beacon whose counters were visibly advancing.
+    """
+    line = compose(STATUS, "silent")
+    assert line.endswith("beacon silent")
+    assert "replug" not in line
 
 
 def test_compose_survives_garbage():

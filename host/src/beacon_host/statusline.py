@@ -22,9 +22,11 @@ log = logging.getLogger(__name__)
 MARKERS = {
     "ok": "beacon",
     "absent": "beacon?",
-    # A frozen panel cannot say it is frozen, so this is the only place a user
-    # will find out, and the only cure is on their desk.
-    "silent": "beacon stuck: replug",
+    # The board has stopped answering. That is either a frozen sketch or a dead
+    # return path with the display still rendering, and the daemon cannot tell
+    # which, so this says only what is known. It used to read "stuck: replug"
+    # and was shown against a beacon whose counters were visibly ticking over.
+    "silent": "beacon silent",
 }
 
 

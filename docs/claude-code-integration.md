@@ -253,13 +253,21 @@ the difference between "the hooks are broken" and "the USB cable is out". It is
 worth having in the terminal because the failure it reports is the one you cannot
 diagnose by looking at the beacon.
 
-`beacon stuck: replug` is the daemon saying the port is open but the board has
-sent no heartbeat for 15 seconds. The display then holds its last frame, which
-looks exactly like a calm desk. Firmware 0.2.0 reboots itself out of a hang, so
-on that version this should last only a few seconds. If it persists, replug the
-board. If it keeps coming back, turn off USB selective suspend for the port, the
-likely trigger: in Device Manager, clear "Allow the computer to turn off this
-device to save power" on the USB Serial Device and on its hub.
+`beacon silent` is the daemon saying the port is open but the board has sent no
+heartbeat for 15 seconds. It does not say the display is frozen, because the
+daemon has no way to know: either the sketch has stopped, in which case the panel
+holds its last frame and looks exactly like a calm desk, or only the board's
+return path has died, in which case the display is still drawing every snapshot
+it is sent and nothing is wrong with it but this marker. Look at the beacon --
+that is the one question the terminal cannot answer and a glance can.
+
+Either way the board cures itself. Firmware 0.2.0 reboots out of a hung `loop()`
+after 5 seconds, and 0.2.1 reboots out of a dead return path after 30, so the
+marker should clear within a minute; `/health`'s `wedge` counts the second kind
+after the fact. If it persists past that, replug the board. If it keeps coming
+back, turn off USB selective suspend for the port, the likely trigger: in Device
+Manager, clear "Allow the computer to turn off this device to save power" on the
+USB Serial Device and on its hub.
 
 That shot also happens to show the null-context case: there is no `ctx` segment
 because `used_percentage` is null early in a session and after a compaction, and

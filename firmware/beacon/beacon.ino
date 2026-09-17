@@ -13,6 +13,7 @@
 //   demo   load a canned snapshot and animate it
 //   live   leave demo mode
 //   hang   stop loop() on purpose, to check the watchdog reboots the board
+//   wedge  pretend the host detached, to check the TX watchdog reboots it
 //   ?      command list
 
 #include <SPI.h>
@@ -74,7 +75,7 @@ static void applyPanelColorOrder() {
 }
 
 // ---- Constants ----
-static constexpr const char* FW_VERSION = "0.2.0";
+static constexpr const char* FW_VERSION = "0.2.1";
 static constexpr uint8_t  PROTOCOL_V    = 1;
 static constexpr uint32_t BAUD          = 115200;
 static constexpr size_t   LINE_BUF      = 1024;
@@ -247,12 +248,22 @@ size_t txHead = 0;       // next byte to send
 size_t txTail = 0;       // one past the last queued byte
 uint32_t txDropped = 0;  // lines lost to a stalled pipe with a host attached
 
-// Whether a host holds the port (DTR asserted). This is the check write() itself
-// makes. Do not use `if (Serial)` instead: that reads a separate flag which a
-// DTR/RTS pattern detector updates only in its idle state, and it stayed false
-// for the daemon's connection, so every heartbeat was discarded and the host
-// reported a healthy board as stuck.
-static bool hostAttached() { return tud_cdc_n_connected(0); }
+// Whether a host holds the port. This is the check write() itself makes. Do not
+// use `if (Serial)` instead: that reads a separate flag which a DTR/RTS pattern
+// detector updates only in its idle state, and it stayed false for the daemon's
+// connection, so every heartbeat was discarded and the host reported a healthy
+// board as stuck.
+//
+// It is not a sign of life either, and it cannot be made into one. This flag is
+// `tud_mounted() && !tud_suspended() && DTR`, and it has been seen false on a
+// link that was still delivering snapshots: the board rendered every frame it
+// was sent while no heartbeat left it for over two hours. Do not answer that by
+// dropping the checks below, which is the obvious move and does nothing:
+// USBCDC::write() and availableForWrite() test the same flag themselves and
+// both return 0 while it is false, so no byte can leave this board by any route
+// the sketch controls. txWatchdog() cures it instead, by rebooting.
+static bool forceDetached = false;  // `wedge` command; bench test only
+static bool hostAttached() { return tud_cdc_n_connected(0) && !forceDetached; }
 
 static void txLine(const char* s) {
   // No host holding the port: nothing will read it, and counting these would
@@ -331,6 +342,66 @@ static bool isAmberAge(const char* st) {
 // timeout and fires it immediately.
 static inline bool elapsed(uint32_t now, uint32_t since, uint32_t ms) {
   return (int32_t)(now - since) >= (int32_t)ms;
+}
+
+// ---- Outbound stall watchdog ----
+//
+// hostAttached() reading false silences every outgoing line, and nothing in
+// this sketch can lift that (see the note on it above). Inbound data is not
+// gated on it at all, so the link goes on delivering snapshots that this board
+// renders perfectly while its heartbeat is gone for good. The host sees only
+// the missing heartbeat and reports a stuck board, which is exactly backwards:
+// the display is the half that still works.
+//
+// Receiving snapshots while hostAttached() says no host is a contradiction, and
+// it is the only evidence of this state anywhere on either side of the link.
+// Held for TX_WEDGE_MS it means the flag is stale rather than the cable being
+// out, and the cure is the one this has been costing users by hand: re-enumerate
+// the device. Rebooting is how, since the host already treats a reboot as an
+// ordinary reconnect, and loop() must not block for seconds so there is nothing
+// gentler to try. `wedge` tests it.
+//
+// The count survives into the next boot in RTC memory and leaves in the
+// heartbeat's `wedge`, because `rst` alone cannot tell this reboot apart from
+// any other and the episode is over by the time anyone can look.
+//
+// RTC_NOINIT_ATTR, not RTC_DATA_ATTR: the latter is re-initialised on a
+// software restart, which is precisely the event being counted, so the count
+// would always read 0. The price is that these are undefined after a power-on
+// reset rather than zeroed, hence the cookie and setup()'s check.
+static constexpr uint32_t TX_WEDGE_MS = 30000;
+static constexpr uint32_t WEDGE_COOKIE = 0x57454447;  // 'WEDG'
+RTC_NOINIT_ATTR uint32_t wedgeCookie;
+RTC_NOINIT_ATTR uint32_t wedgeCures;
+uint32_t attachFlips = 0;    // hostAttached() transitions, 1 after a normal connect
+bool attachWas = false;
+uint32_t wedgeSinceMs = 0;   // when the contradiction started; 0 = not in one
+
+// Call once, before the first heartbeat can report the count.
+static void wedgeCountBegin() {
+  if (wedgeCookie != WEDGE_COOKIE) {  // cold boot: RTC memory holds garbage
+    wedgeCookie = WEDGE_COOKIE;
+    wedgeCures = 0;
+  }
+}
+
+static void txWatchdog(uint32_t now) {
+  const bool attached = hostAttached();
+  if (attached != attachWas) {
+    attachWas = attached;
+    attachFlips++;
+  }
+  // No recent snapshot means the host really has gone, which is not this fault.
+  // A board on a charger sees no host and no traffic, and must not reboot
+  // itself every half minute; demo mode drives lastMsgMs itself, so exclude it.
+  if (attached || demoMode || elapsed(now, lastMsgMs, NO_HOST_MS)) {
+    wedgeSinceMs = 0;
+    return;
+  }
+  if (!wedgeSinceMs) wedgeSinceMs = now | 1;  // 0 is the sentinel, so never store it
+  if (!elapsed(now, wedgeSinceMs, TX_WEDGE_MS)) return;
+  wedgeCures++;
+  ESP.restart();
 }
 
 // Right-aligned inside a fixed-width field, so "9s" and "10s" occupy the same
@@ -770,7 +841,7 @@ static void demoLoad() {
 }
 
 static void help() {
-  txLine("send a JSON snapshot line, or: demo | live | hang | ?");
+  txLine("send a JSON snapshot line, or: demo | live | hang | wedge | ?");
 }
 
 static void handleCommand(const char* cmd) {
@@ -784,11 +855,24 @@ static void handleCommand(const char* cmd) {
     while (!elapsed(millis(), t0, 200)) txPump();  // let the reply out first
     for (;;) {}
   }
+  else if (!strcmp(cmd, "wedge")) {
+    // Bench test for txWatchdog(). With this set hostAttached() reads false,
+    // which is what the real fault looks like from inside the sketch, so as
+    // long as the host keeps sending snapshots the board should reboot about
+    // TX_WEDGE_MS later. The next heartbeat reports `rst` as `sw` and `wedge`
+    // one higher; the display keeps rendering throughout, as it does in the
+    // fault this imitates.
+    txLine("pretending the host detached; the TX watchdog should reboot this board");
+    const uint32_t t0 = millis();
+    while (!elapsed(millis(), t0, 200)) txPump();  // let the reply out first
+    forceDetached = true;
+  }
   else                           help();
 }
 
 // ---- Arduino ----
 void setup() {
+  wedgeCountBegin();
   Serial.setRxBufferSize(4096);  // must precede begin(); default is far smaller
   Serial.begin(BAUD);
   tft.initR(INITR_GREENTAB);
@@ -872,12 +956,13 @@ void loop() {
     lastHbMs = now;
     int32_t since = (int32_t)(now - lastMsgMs);
     if (since < 0) since = 0;
-    char hb[224];
+    char hb[256];
     snprintf(hb, sizeof hb,
-             "{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
+             "{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"aflip\":%lu,\"wedge\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
              FW_VERSION, (unsigned long)(now / 1000),
              (unsigned long)rxLines, (unsigned long)rxBad,
-             (unsigned long)rxDropped, (unsigned long)txDropped, (long)since,
+             (unsigned long)rxDropped, (unsigned long)txDropped,
+             (unsigned long)attachFlips, (unsigned long)wedgeCures, (long)since,
              (unsigned long)lastRenderMs,
 #if USE_HARDWARE_SPI
              "hw",
@@ -888,5 +973,6 @@ void loop() {
     txLine(hb);
   }
 
+  txWatchdog(now);
   txPump();
 }

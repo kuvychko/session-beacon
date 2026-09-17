@@ -208,9 +208,11 @@ feeds it the cost and context figures:
 The trailing `beacon` is the daemon confirming it is talking to the device. It
 turns into `beacon?` when it is not, which is how an unplugged display or a
 half-dead daemon announces itself without your having to look away from the
-terminal. `beacon stuck: replug` means the board is plugged in but has stopped
-answering: its display is frozen on old rows, and unplugging and replugging it
-fixes that. Everything to its left comes from the same payload the device gets.
+terminal. `beacon silent` means the board is plugged in but has stopped
+answering. That is worth a glance at the beacon rather than a replug: the daemon
+cannot see whether the display froze with it or is still drawing perfectly behind
+a dead return path, and the board reboots itself out of either within a minute.
+Everything to its left comes from the same payload the device gets.
 
 Details: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md), [docs/claude-code-integration.md](docs/claude-code-integration.md).
 

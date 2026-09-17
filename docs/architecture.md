@@ -90,7 +90,7 @@ What would change the answer:
 
 The statusline hook is also plain curl. It POSTs the payload to `/status` and the daemon returns the text to display in the response body, which curl prints. That keeps a second interpreter out of a path that runs on every status refresh.
 
-The reply is composed purely from the payload just received, so the HTTP handler needs no shared state and no locking. The one external fact it uses is the device state, which appears as a marker at the end of the line: `beacon` when the board is answering, `beacon?` when there is no port, and `beacon stuck: replug` when the port is open but the heartbeats have stopped. That makes a dead daemon, an unplugged display or a frozen one visible in the terminal without looking at the device. The last case matters most, because a frozen display looks exactly like a working one.
+The reply is composed purely from the payload just received, so the HTTP handler needs no shared state and no locking. The one external fact it uses is the device state, which appears as a marker at the end of the line: `beacon` when the board is answering, `beacon?` when there is no port, and `beacon silent` when the port is open but the heartbeats have stopped. That makes a dead daemon, an unplugged display or a mute one visible in the terminal without looking at the device. The last case is the one the marker is worst at describing, so it describes only what is known: a silent board may be frozen, or may be rendering perfectly with only its return path dead, and the daemon cannot tell. It used to read `beacon stuck: replug` and was shown for two hours against a beacon whose counters were visibly advancing.
 
 `/event` replies `204` with an empty body, deliberately. Claude Code feeds some hooks' stdout back into the session as context, so the forwarder must print nothing. That answer happens to satisfy the HTTP hook contract as well, where a response body must be empty or JSON, so the constraint now has two independent reasons behind it.
 
@@ -409,6 +409,20 @@ Three changes, all worth keeping:
 - Output is queued and pumped out no faster than the FIFO drains. A stalled pipe drops whole lines, counted in `txdrop`. It no longer blocks.
 - The loop watchdog turns any future hang, whatever the cause, into a reboot after 5 s. The next heartbeat's `rst` shows it.
 - The host acts on the heartbeat. It reports a port that is open but silent for 15 s as `silent` in `/health` and in the status line, and it logs a warning. A drop in the board's uptime is logged as a reboot, with the reason. Reopening the port does not revive a wedged board, so the host only reports it.
+
+### A silent board is not a frozen one
+
+Three sessions showed `beacon stuck: replug` for over two hours while the beacon on the desk was plainly alive: its rows aged and its counters advanced in real time. Two `/health` calls 137 s apart showed `age_s` climbing by exactly the wall clock and `up` frozen at the value it had had two hours earlier, so no heartbeat had arrived -- while `rows` changed between the two calls, so the daemon was sending snapshots the whole time and the board was drawing them. Only the return path was dead.
+
+The asymmetry is in the firmware. Every outgoing line passes `hostAttached()`, which is TinyUSB's `tud_cdc_n_connected(0)`. Inbound data passes nothing: `loop()` drains `Serial.available()` and renders whatever arrives. So a false `hostAttached()` silences the board completely and costs it nothing else.
+
+That flag is `tud_mounted() && !tud_suspended() && DTR`, three facts that can each go false without the pipe stopping -- a missed RESUME after a selective-suspend cycle leaves `suspended` set while data still flows, and a DTR that Windows drops is never re-asserted, because the daemon never reopens the port. It has been wrong before: the `if (Serial)` check it replaced was wrong in the other direction.
+
+**Removing the `hostAttached()` checks does not fix this, and that is worth knowing before anyone tries.** It is the obvious move and it is useless: `USBCDC::write()` and `USBCDC::availableForWrite()` both test `tud_cdc_n_connected()` themselves and return 0 while it is false. No byte can leave the board by any route the sketch controls. Nor can the host cure it -- reopening the port was already shown not to work, and deliberately toggling DTR/RTS would be worse than useless, because the core watches those two lines for a four-step pattern that restarts the chip into its bootloader.
+
+What the firmware *can* do is notice. Receiving a snapshot while `hostAttached()` says no host is a flat contradiction, and it is the only evidence of this state anywhere on either side of the link. `txWatchdog()` holds it for 30 s -- long enough that a genuine unplug resolves itself, since with no host there is no inbound traffic either -- and then does what users were doing by hand: re-enumerates the device by rebooting it. The host already treats a reboot as an ordinary reconnect.
+
+The cure is invisible by the time anyone looks, so it is counted in RTC memory, which survives the software reset, and reported in every later heartbeat as `wedge`. A rise in it is logged by the host. `aflip` counts how often the flag has changed at all, so a link that is flapping but recovering can be seen before it sticks. The `wedge` serial command forces the flag false to test the whole path on the bench, as `hang` does for the loop watchdog.
 
 ### Timing: never subtract unsigned millis directly
 
