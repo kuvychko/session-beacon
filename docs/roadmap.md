@@ -1,7 +1,7 @@
 # Roadmap
 
 **Where this stands:** the beacon has been in daily use since early September. The Nano
-ESP32 build is complete: firmware 0.2.1, host daemon, hooks, enclosure and stand.
+ESP32 build is complete: firmware 0.2.2, host daemon, hooks, enclosure and stand.
 The next big item is a second build on a **Waveshare RP2040-Zero**.
 
 The document goes from what comes next to what is already done: the next build, the
@@ -36,10 +36,11 @@ still needs no level shifting. The port notes written before this was planned ar
   core's CDC `write()` blocks. Test the RP2040 core's CDC for the same wedge instead of
   assuming the ESP32 findings carry over, in either direction.
 - [ ] **Watchdog and reset survival.** `enableLoopWDT()` needs the RP2040 hardware
-  watchdog in its place. The counters that must survive a reboot (`wedgeCures`, and the
-  heartbeat's `wedge` and `rst`) are `RTC_NOINIT_ATTR` today. They need an equivalent
-  such as watchdog scratch registers or uninitialised RAM. Verify with the `hang`
-  command, as on the Nano.
+  watchdog in its place. The values that must survive a reboot (`wedgeCures`,
+  `wedgeCause` and `wedgeFlips`, which feed the heartbeat's `wedge`, `wcause` and
+  `wflip`) are `RTC_NOINIT_ATTR` today, and `rst` comes from `esp_reset_reason()`. They
+  need an equivalent such as watchdog scratch registers or uninitialised RAM. Verify with
+  the `hang` command, as on the Nano.
 - [ ] **Host detection.** `serial_link.py` finds the board by the Nano ESP32's VID/PID
   (`0x2341`/`0x0070`) only. Add the RP2040-Zero's IDs. Re-check the rule that the host
   never toggles DTR/RTS: the bootloader-entry trigger differs per board. Document which
@@ -58,7 +59,8 @@ fixes drift apart.
 
 **Done when:** an RP2040-Zero in its own case runs a full working day next to the Nano,
 fed by the same daemon, with no difference in behaviour. The loop watchdog (`hang`) and
-the wedge watchdog must also be verified on it.
+both paths of the wedge watchdog (`scripts/wedge-bench.py` with `stall` and `wedge`) must
+also be verified on it.
 
 ## Smaller open items
 
@@ -117,6 +119,7 @@ each is guarded by a test, a fixture or a rule in `CLAUDE.md`.
 | 09-17 | "Replug" shown for two hours against a board that was working | Only the return path was dead | `txWatchdog()` reboots the board to re-enumerate ([details](architecture.md#a-silent-board-is-not-a-frozen-one)) |
 | 09-18 | A window closed after its turn stayed green for a day | Only `WORKING` had a staleness timer | `IDLE` with no event for `idle_stale_s` (10 min) goes stale |
 | 09-18 | A daemon restart after flashing silently did nothing | A daemon started by hand was invisible to the Scheduled Task | `scripts/restart-daemon.ps1` is the only way to restart it, and `/health` reports the pid |
+| 09-18 | No heartbeat for five hours while the board rendered every snapshot, and `txWatchdog()` never fired | It trusted `hostAttached()`, which read true over a FIFO that never drained, or kept flickering back to true | The watchdog trusts bytes written instead. Each cure records `wcause` and `wflip`, and `stall` tests the new path. Firmware 0.2.2 ([details](architecture.md#a-silent-board-is-not-a-frozen-one)) |
 
 ## How we got here
 
