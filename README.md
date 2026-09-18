@@ -274,12 +274,12 @@ Code samples inside the documentation are MIT, not CC BY, so you can copy a pin
 definition or a shell command without attributing anything. Every dependency is
 BSD or MIT, so nothing here constrains what you do with it.
 
-**Interest in an RP2040 port is welcome.** The Nano ESP32 is overkill for this: its
+**An RP2040 version is planned.** The Nano ESP32 is overkill for this: its
 Wi-Fi and Bluetooth are most of what you pay for and the project uses neither, by
-design. A Waveshare RP2040-Zero would be cheaper and smaller. If there is enough
-interest, I am willing to test that board and design a dedicated enclosure for it.
-Say so in an issue. The case is published as STEP as well as mesh, so a redesign does
-not depend on owning SolidWorks or on waiting for me. What a port involves is written up in
+design. A Waveshare RP2040-Zero is cheaper and smaller, and a build on it, with its
+own enclosure, is the next item on the [roadmap](docs/roadmap.md#next-rp2040-zero-edition).
+The case is published as STEP as well as mesh, so a redesign of your own does not
+depend on owning SolidWorks or on waiting for me. What a port involves is written up in
 [docs/enclosure.md](docs/enclosure.md#if-you-were-starting-from-scratch).
 
 ## Repository layout

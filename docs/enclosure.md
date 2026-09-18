@@ -178,12 +178,11 @@ Two things stand in the way, and both are real work rather than a swap:
   ArduinoJson all support RP2040, and the colour-order fix is a register write that is
   independent of the microcontroller.
 
-Untested. Nobody has built this on an RP2040-Zero; the above is what a port would have
-to deal with, not a report from having done it.
+Untested. Nobody has built this on an RP2040-Zero yet; the above is what a port would
+have to deal with, not a report from having done it.
 
-**If there is enough interest, this is worth doing properly.** The maintainer is
-willing to test an RP2040-Zero and design a dedicated enclosure for it rather than
-leave the port as an exercise. Open an issue if you would use it.
+**This is now planned.** An RP2040-Zero build with a dedicated enclosure is the next
+item on the [roadmap](roadmap.md#next-rp2040-zero-edition), which tracks the work.
 
 ## Versioning
 

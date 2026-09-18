@@ -1,97 +1,165 @@
 # Roadmap
 
-Phases are ordered so that each one produces something visibly useful on the desk. Estimates are rough and assume Claude Code does most of the typing.
+**Where this stands:** the beacon has been in daily use since early September. The Nano
+ESP32 build is complete: firmware 0.2.1, host daemon, hooks, enclosure and stand.
+The next big item is a second build on a **Waveshare RP2040-Zero**.
 
-**Where this stands: phases 0 and 1 are complete and the device is in daily use.**
-Most of phase 2 is done as well. What is left is listed under "still open" below.
+The document goes from what comes next to what is already done: the next build, the
+smaller open items, the things decided against, the recent hardening work, and then
+the history.
 
-## Phase 0: Scoping (done)
+## Next: RP2040-Zero edition
 
-Docs, repo layout, protocol, skeletons.
+**Why.** Most of what the Nano ESP32 costs is its Wi-Fi and Bluetooth, and this project
+uses neither on purpose ([non-goals](architecture.md#non-goals-for-now)). The
+RP2040-Zero is far smaller and cheaper, has USB-C, and uses 3.3 V logic, so the display
+still needs no level shifting. The port notes written before this was planned are in
+[enclosure.md](enclosure.md#if-you-were-starting-from-scratch).
 
-## Phase 1: Blink the beacon
+**Ground rules.**
 
-Goal: the screen shows real session states from real Claude Code sessions.
+- The protocol does not change. The host should not care which board is on the other end.
+- The firmware stays dumb. The port moves code between boards and adds no behaviour.
+- The Nano ESP32 build stays supported. It is the reference, and every fix learned on it
+  must carry over.
 
-1. ~~Confirm hook payload shapes.~~ **Done.** Real payloads captured on this machine and committed as fixtures, with the tests replaying an actual session lifecycle. Capturing found four field names where the published schema disagrees with what this build sends. The attention events remain unobserved because they need an interactive permission prompt. See [claude-code-integration.md](claude-code-integration.md).
-2. ~~Wire the display and flash `firmware/tft_smoketest/tft_smoketest.ino`.~~ **Done.** Wiring, offsets, rotation, and text metrics all check out. The panel turned out to be BGR-wired and needed a colour-order register fix, now applied in both sketches. See [hardware.md](hardware.md#panel-colour-order).
-3. ~~Firmware: parse `snap`, draw header, rows, footer, "no host" screen.~~ **Done and verified on hardware** with the `demo` command.
-4. ~~Host: state machine, hook server, serial link.~~ **Done.** TOML config, rotating log, `/health`, Scheduled Task installer. Verified end to end against the board.
-5. ~~Hook forwarder and settings.~~ **Done.** Forwarding is `curl`, installed by `scripts/install-hooks.ps1`. Remaining: watch it with several real sessions running and confirm the exit criteria below.
-6. ~~Stabilise on hardware.~~ **Done.** Fixed an unsigned-underflow timing bug that made the device alternate with "no host", and added receive counters to the heartbeat so host-side and device-side silence can be told apart.
+**Work.** Each item comes from ESP32-specific code or hardware already in the tree:
 
-Exit criteria: leaving a session on a permission prompt turns its row red within one second; answering it turns it blue; `Stop` turns it green. Leaving it unanswered stops the pulse after two minutes and the red after ten.
+- [ ] **Wiring.** Put the display on one of the RP2040's hardware SPI pin sets, using
+  GP-numbered pins where the Nano uses `D8`–`D13`, and document it in
+  [hardware.md](hardware.md#wiring). Confirm that 24 MHz SPI holds and that the panel
+  still needs the BGR `applyPanelColorOrder()` write. The panel decides that, not the
+  microcontroller, but check it on the bench.
+- [ ] **USB serial layer.** `beacon.ino` includes `tusb.h` and `esp_system.h`, and calls
+  `tud_cdc_n_connected()`, `Serial.setRxBufferSize()` and `esp_reset_reason()`. Those are
+  ESP32 core APIs. `txLine()`/`txPump()`/`txWatchdog()` exist because of how *that*
+  core's CDC `write()` blocks. Test the RP2040 core's CDC for the same wedge instead of
+  assuming the ESP32 findings carry over, in either direction.
+- [ ] **Watchdog and reset survival.** `enableLoopWDT()` needs the RP2040 hardware
+  watchdog in its place. The counters that must survive a reboot (`wedgeCures`, and the
+  heartbeat's `wedge` and `rst`) are `RTC_NOINIT_ATTR` today. They need an equivalent
+  such as watchdog scratch registers or uninitialised RAM. Verify with the `hang`
+  command, as on the Nano.
+- [ ] **Host detection.** `serial_link.py` finds the board by the Nano ESP32's VID/PID
+  (`0x2341`/`0x0070`) only. Add the RP2040-Zero's IDs. Re-check the rule that the host
+  never toggles DTR/RTS: the bootloader-entry trigger differs per board. Document which
+  trigger applies to which board.
+- [ ] **Build and flash.** Pick an arduino-cli FQBN and an upload path (UF2/BOOTSEL), and
+  add both to the commands in `CLAUDE.md` next to the Nano's.
+- [ ] **Enclosure.** Design a new case sized to the Zero. Only the display cutout carries
+  over. It is a new part family starting at `-v0`, per
+  [the versioning rule](enclosure.md#versioning).
+- [ ] **Docs.** Add a BOM, the README hardware table, and a photo of the finished unit.
 
-## Phase 2: Make it a daily driver
+**Open decision:** one sketch with a thin per-board layer, or a separate
+`firmware/beacon_rp2040/`. Leaning towards one sketch. Almost every hard-won rule in
+`CLAUDE.md` lives in the shared rendering and parsing code, and two copies would let the
+fixes drift apart.
 
-Done:
+**Done when:** an RP2040-Zero in its own case runs a full working day next to the Nano,
+fed by the same daemon, with no difference in behaviour. The loop watchdog (`hang`) and
+the wedge watchdog must also be verified on it.
 
-- ~~Auto-detect COM port by VID/PID; reconnect after reflash or unplug.~~
-- ~~Run at login (Task Scheduler, `pythonw`), log to a rotating file.~~ The script
-  exists as `scripts/install-task.ps1`; installing it is a per-machine step.
-- ~~Cost and context percent in the footer from the statusline payload.~~
-- ~~A false red while a turn waited on background work.~~ **Done.** `Stop` carries
-  `background_tasks`; a turn that ends with a subagent running stays `WORKING`,
-  and `idle_prompt` is held back while any are outstanding. Fixed against a
-  captured payload rather than the guessed shape.
-- ~~Blink and stale handling polished.~~ The alarm now decays: it pulses for two
-  minutes, holds a static red for eight more, then settles to an amber dot and
-  sorts below the working sessions. A permanent blink had two sessions lit for
-  thirteen hours. See [the attention ladder](architecture.md#the-attention-ladder).
-- ~~Label overrides in config.~~ Keyed by repo root or exact directory.
-- ~~Act on a missing heartbeat.~~ **Done.** It was prompted by a display that froze
-  eight times in eight days while `/health` said `"device": true`. The cause was
-  the heartbeat's own `Serial.printf` waiting forever on a USB pipe that had
-  stopped draining. The firmware now queues its output and never waits, the loop
-  watchdog reboots the board if anything else hangs, and the host reports a port
-  that is open but silent as `silent`. See
-  [architecture.md](architecture.md#usb-writes-must-never-wait).
+## Smaller open items
 
-Still open:
+These are display work. The data is already there, so each item needs a layout decision
+rather than plumbing.
 
-- **Last tool name per row.** The host already records it and the protocol carries a
-  `tool` field; nothing draws it. There is no room on a row without giving up label
-  width, so it needs a layout decision rather than plumbing.
-- **Overflow indicator for more than six sessions.** The host sorts and truncates
-  correctly and the header's active count reveals the overflow, but nothing says
-  "there are more below".
-- **Backlight on a PWM pin, dimming after some minutes of all-idle.** Needs one wire
-  moved from 3V3 to a PWM-capable pin, so it is a hardware change, not just firmware.
+- **Last tool name per row.** The host records it and the protocol carries a `tool`
+  field, but nothing draws it. There is no room on a row without giving up label width.
+- **"More below" indicator.** With more than six sessions, the host sorts and truncates
+  correctly and the header's active count reveals the overflow. Nothing on the screen
+  says there are more rows.
+- **Subagent count on a row.** The host already tracks how many are outstanding
+  (`SubagentStop` is registered).
 
-### Account-level rate limits ~~(unbuilt)~~ **done**
+## Maybe later
 
-The footer alternates every four seconds between the featured session's context and
-the account's five-hour and seven-day usage. Both pages share the same field
-positions so nothing jumps. Reset timestamps are available in the payload but not
-yet shown; the percentage is the actionable number and there is no room for both.
+- Session history: how long each session spent waiting on you today. This would need a
+  tiny SQLite store in the host.
+- Linux host support. Only the hook command line and the serial device path differ.
+- Tray icon for the daemon, with "show log" and "quit".
+- A second page, or scrolling, for more than six sessions, driven by a button on the
+  device.
 
-### Enclosure ~~(TBD)~~ **done**
+## Decided against
 
-Three printed parts, fitted, in `enclosure/` as SolidWorks source, STEP and 3MF,
-with print settings and the full bill of materials in [enclosure.md](enclosure.md).
-An optional 25-degree desk stand is there too, printed and in use; the case is a
-friction fit in it and nothing fastens the two together.
+- **Piezo or LED cue on `NEEDS_INPUT`.** Not wanted. The red row and its decaying pulse
+  are enough.
+- **Backlight on a PWM pin, dimming when idle.** The panel's brightness is fine as it
+  is, and this would mean moving a wire. The protocol's `bl` field stays reserved and
+  ignored.
+- **Native `http` hooks in place of `curl`.** `statusLine` is command-only, so `curl`
+  would stay on the busiest path either way. The events it would save cost under a
+  second an hour in total. See
+  [architecture.md](architecture.md#native-http-hooks-were-evaluated-and-not-adopted)
+  for the evidence and for what would change the answer.
+- **Wi-Fi, MQTT, cloud.** USB only, by design. See
+  [non-goals](architecture.md#non-goals-for-now).
 
-## Phase 3: Nice to have
+## Recent hardening (7–18 September)
 
-- Small piezo or LED for an audible or peripheral-vision cue on `NEEDS_INPUT`. The screen alone may not be enough when looking at another monitor.
-- Session history: how long each session spent waiting on you today. Would need a tiny SQLite store in the host.
-- Linux host support: only the hook command line and serial device path differ.
-- Hardware SPI and dirty-row rendering if flicker is noticeable.
-- Show a subagent count on the row. `SubagentStop` is now registered and the host
-  already tracks how many are outstanding, so this is a display question rather
-  than a data one.
-- Tray icon for the daemon with a "show log" and "quit" menu.
-- Second page or scroll for more than six sessions, driven by a button on the device.
+Once the beacon was in daily use, it began showing the wrong thing in ways a test bench
+never would. Every fix below started from a real observation or a captured payload, and
+each is guarded by a test, a fixture or a rule in `CLAUDE.md`.
+
+| Date | What was seen | Cause | Fix |
+|---|---|---|---|
+| 09-07 | Two sessions pulsed red for thirteen hours | The alarm never decayed | [The attention ladder](architecture.md#the-attention-ladder): two minutes of pulse, eight of red, then amber sorted below the working sessions |
+| 09-07 | A turn waiting on a subagent went red | `Stop` was read as idle even with background work pending | `background_tasks` keeps it `WORKING` and holds back `idle_prompt` |
+| 09-07 | A prompt answered "no" left the row red | A rejection runs no tool, so no `PostToolUse` arrives | `PostToolBatch` registered: it is the only event that arrives when a human answers |
+| 09-07 | Waiting sessions vanished on every daemon restart | State lived only in memory, and a parked session sends nothing | Written to `sessions.json` atomically, restored at start |
+| 09-08 | A session blocked on you showed blue | A subagent's events carry the parent's `session_id` | Tell them apart by `agent_id`. `SubagentStop` recomputes the count |
+| 09-09 | A finished session showed blue, then amber, never red | An armed artifact comment monitor counted as work that never ends | Count only `subagent` tasks ([details](claude-code-integration.md#background_tasks-is-not-only-subagents)) |
+| 09-10 | An orchestrator waiting on a workflow went full red | One severity for two different messages | [A cyan `look` rung](architecture.md#the-soft-rung-needs_look) for "quiet a while", which graduates to red after `look_s` |
+| 09-10 | A session killed by Windows Update stayed on screen for 45 hours | Restored from disk as though it were parked | Nothing is restored across a reboot, and anything silent for 24 hours is dropped |
+| 09-16 | The display froze eight times in eight days while `/health` said ok | The heartbeat's `printf` blocked forever on a USB pipe that had stopped draining | A non-blocking tx queue and the loop watchdog. The host reports `silent` ([details](architecture.md#usb-writes-must-never-wait)) |
+| 09-17 | "Replug" shown for two hours against a board that was working | Only the return path was dead | `txWatchdog()` reboots the board to re-enumerate ([details](architecture.md#a-silent-board-is-not-a-frozen-one)) |
+| 09-18 | A window closed after its turn stayed green for a day | Only `WORKING` had a staleness timer | `IDLE` with no event for `idle_stale_s` (10 min) goes stale |
+| 09-18 | A daemon restart after flashing silently did nothing | A daemon started by hand was invisible to the Scheduled Task | `scripts/restart-daemon.ps1` is the only way to restart it, and `/health` reports the pid |
+
+## How we got here
+
+**Phase 0: scoping (4 Sep).** Docs, repo layout, protocol, skeletons.
+
+**Phase 1: blink the beacon.** Captured real hook payloads, which disagreed with the
+published schema in four places, and committed them as fixtures. Brought up the panel,
+which turned out to be BGR-wired. Built the firmware renderer, the host state machine,
+the hook server and the serial link. Hooks forward with `curl`. The first hardware bug
+was an unsigned `millis()` underflow that painted "no host" over every frame.
+
+Exit criteria, which still define correct behaviour:
+- leaving a session on a permission prompt turns its row red within one second
+- answering it turns it blue
+- `Stop` turns it green
+- left unanswered, the pulse stops after two minutes and the red after ten
+
+**Phase 2: make it a daily driver.**
+- COM port auto-detected by VID/PID, with reconnect after a reflash or unplug.
+- Runs at logon as a Scheduled Task and logs to a rotating file.
+- Hardware SPI at 24 MHz, with in-place field drawing instead of clear-then-draw, which
+  ended a once-a-second flash.
+- Sessions labelled by git repository, with overrides in config.
+- The footer alternates between session context and cost, and the account's five-hour
+  and seven-day usage ([details](architecture.md#the-footer-alternates)).
+- A three-part printed enclosure and a 25-degree stand ([enclosure.md](enclosure.md)).
+- An uninstall script that undoes everything the installers did.
+
+**Phase 3** is the list in "Recent hardening" above. None of it was planned; all of it
+came from living with the device.
 
 ## Open questions
 
-- Does the statusline payload carry context percent directly, or only token counts that need a per-model denominator? Decide in Phase 1 step 1.
-- ~~Should the lifecycle hooks move to Claude Code's native `http` hook type and
-  drop `curl`?~~ **Answered: no.** `statusLine` is command-only, so `curl` stays on
-  the busiest path either way, and the events it would save cost under a second an
-  hour in total. See
-  [architecture.md](architecture.md#native-http-hooks-were-evaluated-and-not-adopted)
-  for the evidence and for what would change the answer.
-- Do hooks on Windows run through cmd, PowerShell, or Git Bash? Affects the `command` string quoting. Test in Phase 1 step 4.
-- Should `IDLE` after a `Stop` count as "needs you"? Arguably yes after some minutes: Claude finished and you have not looked. Start with a configurable `idle_nag_s` (default off) and see what feels right.
+- **RP2040: one sketch or two?** See [the open decision](#next-rp2040-zero-edition)
+  above.
+- **The null context case is untested on real data.** `used_percentage` is null early in
+  a session and after `/compact`. The token-count fallback that covers it has only been
+  exercised by unit tests. See
+  [claude-code-integration.md](claude-code-integration.md#still-to-confirm).
+
+Settled since the last revision:
+- The statusline carries the context percentage directly.
+- Hooks run fine through the `curl` command lines on Windows.
+- `idle_nag_s` was never needed. Claude Code's own `idle_prompt` arrives a few minutes
+  into an idle wait and climbs the attention ladder, and `idle_stale_s` handles a window
+  that was closed instead.
