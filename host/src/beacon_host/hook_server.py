@@ -2,6 +2,7 @@
 
 POST /event   -> queue the payload, reply 204 with an empty body
 POST /status  -> queue the payload, reply 200 with the status line to print
+POST /forget  -> end the session named in the body (id prefix or label)
 GET  /health  -> 200 with a short summary
 
 The empty body on /event matters. Claude Code feeds some hooks' stdout back
@@ -14,17 +15,22 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import queue
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import ClassVar
 
+from . import procwatch
 from .statusline import compose
+
+log = logging.getLogger(__name__)
 
 HOST = "127.0.0.1"
 PORT = 47391
 MAX_BODY = 1 << 20  # 1 MiB; statusline payloads are small, cap the rest
+FORGET_WAIT_S = 2.0  # the main loop answers within a tick; this is generous
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -37,6 +43,10 @@ class _Handler(BaseHTTPRequestHandler):
     # Deliberately shared across every request: the main loop swaps the whole
     # dict, so readers see one consistent snapshot without locking.
     stats: ClassVar[dict] = {}
+    # Sessions whose process has already been looked up, successfully or not.
+    # The lookup costs tens of milliseconds on the hook's clock, so it runs once
+    # per session plus once per SessionStart, never on the busy tool events.
+    tried: ClassVar[set[str]] = set()
 
     protocol_version = "HTTP/1.1"
 
@@ -52,7 +62,45 @@ class _Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
+    def _session_process(self, payload: dict) -> tuple[int, float] | None:
+        """Look up the Claude Code process behind this hook, if it is due.
+
+        Has to happen now, before the reply: once curl disconnects, its row
+        leaves the TCP table and nothing identifies it any more.
+        """
+        sid = payload.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            return None
+        cls = type(self)
+        if sid in cls.tried and payload.get("hook_event_name") != "SessionStart":
+            return None
+        cls.tried.add(sid)
+        proc = procwatch.peer_session_process(self.client_address[1],
+                                              self.server.server_address[1])
+        if proc is None:
+            log.debug("session %s: owning process not found", sid[:8])
+            return None
+        log.debug("session %s: process %d via %s", sid[:8], proc.pid,
+                  " <- ".join(reversed(proc.chain)))
+        return proc.pid, proc.created
+
+    def _forget(self) -> None:
+        key = self._read_body().decode("utf-8", "replace").strip()
+        reply: queue.Queue = queue.Queue(maxsize=1)
+        try:
+            self.q.put_nowait(("forget", key, reply))
+            hits = reply.get(timeout=FORGET_WAIT_S)
+        except (queue.Full, queue.Empty):
+            self._send(503, b'{"error": "daemon busy"}', "application/json")
+            return
+        code = 200 if len(hits) == 1 else 404 if not hits else 409
+        body = {"ended" if code == 200 else "matches": hits}
+        self._send(code, json.dumps(body).encode(), "application/json")
+
     def do_POST(self) -> None:
+        if self.path == "/forget":
+            self._forget()
+            return
         kind = {"/event": "event", "/status": "status"}.get(self.path)
         if kind is None:
             self._send(404)
@@ -64,10 +112,11 @@ class _Handler(BaseHTTPRequestHandler):
         with contextlib.suppress(ValueError, UnicodeDecodeError):
             payload = json.loads(raw)
         if isinstance(payload, dict):
+            proc = self._session_process(payload) if kind == "event" else None
             # Drop rather than block. A hook waiting on this would stall the
             # Claude Code session that fired it.
             with contextlib.suppress(queue.Full):
-                self.q.put_nowait((kind, payload))
+                self.q.put_nowait((kind, payload, proc))
 
         if kind == "status":
             text = compose(payload, type(self).device_state) if isinstance(payload, dict) else ""
@@ -132,6 +181,12 @@ def set_device(state: str, heartbeat: dict | None = None) -> None:
     """Called from the main loop. Plain attribute writes, atomic under the GIL."""
     _Handler.device_state = state
     _Handler.heartbeat = heartbeat
+
+
+def retry_session(sid: str) -> None:
+    """Look up `sid`'s process again on its next event. Called after /forget,
+    which drops the session and so the PID with it."""
+    _Handler.tried.discard(sid)
 
 
 def set_stats(**kwargs) -> None:

@@ -173,3 +173,28 @@ def test_save_replaces_rather_than_truncates(tmp_path):
     assert list(tmp_path.iterdir()) == [p]          # no .tmp left behind
     b = SessionStore()
     assert persist.load(p, b, 2, 86400.0) == 2
+
+
+def test_the_owning_process_survives_a_restart(tmp_path):
+    """A parked session sends nothing that would let the daemon find its
+    process again, so the PID has to be carried across."""
+    p = tmp_path / "sessions.json"
+    a = SessionStore()
+    a.apply_event(ev("PermissionRequest", "n"), 1000, (4242, 1234.5))
+    persist.save(p, a, 1000)
+
+    b = SessionStore()
+    assert persist.load(p, b, 1001, 86400.0) == 1
+    assert b.watched() == {"n": (4242, 1234.5)}
+
+
+def test_a_file_saved_before_pids_still_loads(tmp_path):
+    p = tmp_path / "sessions.json"
+    p.write_text(json.dumps({
+        "v": persist.FORMAT_V, "saved_at": 0,
+        "sessions": [{"session_id": "old", "state": "wait", "last_event": 0,
+                      "state_since": 0, "cwd": "C:/Repos/x", "label": "x"}],
+    }), encoding="utf-8")
+    b = SessionStore()
+    assert persist.load(p, b, 10, 86400.0) == 1
+    assert b.sessions["old"].pid == 0 and b.watched() == {}

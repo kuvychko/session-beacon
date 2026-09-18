@@ -325,6 +325,12 @@ Windows notes:
 "C:/Repos/long-project-name" = "fd-research"
 ```
 
+No hook or statusline payload carries a PID. The daemon finds a session's process
+itself, from the TCP connection its `curl.exe` hook makes, by walking up the process
+tree to the first `claude.exe` or `node.exe`. On 2026-09-18 a live hook resolved to
+the session's own `claude.exe`, which lives as long as the
+session. See architecture.md, "A killed session ends when its process does".
+
 ## How much of this is verified
 
 Four different levels, and the difference matters.

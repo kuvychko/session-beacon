@@ -1030,3 +1030,66 @@ def test_a_long_override_is_elided_too():
     st = SessionStore(label_overrides={"C:/nowhere/x": "an-override-that-is-long"})
     st.apply_event(ev("UserPromptSubmit", cwd="C:/nowhere/x"), 0)
     assert st.snapshot(1)["s"][0]["l"] == "an-overri..-long"
+
+
+# ---- process liveness and manual override ----
+
+def test_first_resolved_process_sticks_until_session_start():
+    """Any event may supply the PID once; only SessionStart may replace it,
+    because a resumed session runs in a new process."""
+    st = SessionStore()
+    st.apply_event(ev("UserPromptSubmit"), 0, (100, 1.5))
+    st.apply_event(ev("PostToolUse", tool_name="Bash"), 1, (200, 2.5))
+    s = st.sessions["abc12345-0000"]
+    assert (s.pid, s.pid_created) == (100, 1.5)
+
+    st.apply_event(ev("SessionStart"), 2, (300, 3.5))
+    assert (s.pid, s.pid_created) == (300, 3.5)
+    st.apply_event(ev("Stop"), 3)                      # no lookup: keeps it
+    assert st.watched() == {"abc12345-0000": (300, 3.5)}
+
+
+def test_a_dead_process_ends_the_session_whatever_its_state():
+    """A killed session never sends SessionEnd. Its row used to ride the ladder
+    to `wait` and sit there for a day."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest"), 0, (100, 1.5))
+    st.tick(3600)
+    assert st.sessions["abc12345-0000"].state == State.WAITING
+
+    assert st.process_gone("abc12345-0000", 3600)
+    assert st.sessions["abc12345-0000"].state == State.ENDED
+    assert st.watched() == {}
+    assert not st.process_gone("abc12345-0000", 3601)     # already ended
+    assert not st.process_gone("nobody", 3601)
+    st.tick(3600 + st.ended_grace_s + 1)
+    assert st.sessions == {}
+
+
+def test_forget_by_id_prefix_or_label():
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest", "aaaa1111"), 0)
+    st.apply_event(ev("PermissionRequest", "bbbb2222", "C:/Repos/homelab"), 0)
+
+    assert [s.session_id for s in st.forget("aaaa", 1)] == ["aaaa1111"]
+    assert st.sessions["aaaa1111"].state == State.ENDED
+    assert [s.session_id for s in st.forget("homelab", 1)] == ["bbbb2222"]
+    assert st.sessions["bbbb2222"].state == State.ENDED
+    assert st.forget("homelab", 2) == []              # ended sessions don't match
+
+
+def test_forget_refuses_an_ambiguous_or_too_short_key():
+    """Two clones of one repo share a label; ending either on a guess would hide
+    a session that may be waiting on you."""
+    st = SessionStore()
+    st.apply_event(ev("PermissionRequest", "aaaa1111"), 0)
+    st.apply_event(ev("PermissionRequest", "aaaa2222"), 0)
+
+    assert len(st.forget("session-beacon", 1)) == 2
+    assert len(st.forget("aaaa", 1)) == 2
+    assert st.forget("aa", 1) == []
+    assert st.forget("  ", 1) == []
+    assert {s.state for s in st.sessions.values()} == {State.NEEDS_INPUT}
+
+    assert len(st.forget("aaaa2", 1)) == 1
+    assert st.sessions["aaaa2222"].state == State.ENDED

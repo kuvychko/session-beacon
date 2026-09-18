@@ -5,6 +5,7 @@ import logging
 import os
 import queue
 import socket
+import urllib.error
 import urllib.request
 
 from beacon_host import hook_server
@@ -105,7 +106,7 @@ def test_http_event_and_status_roundtrip():
             assert json.loads(r.read())["device"] is True
 
         kinds = [q.get_nowait() for _ in range(2)]
-        assert [k for k, _ in kinds] == ["event", "status"]
+        assert [k for k, *_ in kinds] == ["event", "status"]
     finally:
         srv.shutdown()
 
@@ -273,3 +274,63 @@ def test_a_lost_bind_to_something_else_says_so():
         other.listen()
         # Listening but never answering HTTP: the probe times out or is refused.
         assert "not beacon-host" in describe_port_holder(other.getsockname()[1])
+
+
+def test_event_lookup_runs_once_per_session_and_again_on_session_start(monkeypatch):
+    """The lookup costs tens of milliseconds on the hook's clock, so the busy
+    tool events must not pay it."""
+    calls = []
+
+    def fake(client_port, server_port):
+        calls.append(server_port)
+        return None
+
+    monkeypatch.setattr(hook_server.procwatch, "peer_session_process", fake)
+    monkeypatch.setattr(hook_server._Handler, "tried", set())
+    q = queue.Queue()
+    srv = hook_server.start(q, port=0)
+    port = srv.server_address[1]
+    try:
+        for name in ("UserPromptSubmit", "PostToolUse", "SessionStart", "Stop"):
+            _post(port, "/event", {"hook_event_name": name, "session_id": "s9"})
+        _post(port, "/status", STATUS)
+        assert calls == [port, port]
+        assert [item[2] for item in list(q.queue)] == [None] * 5
+    finally:
+        srv.shutdown()
+
+
+def test_forget_endpoint_answers_from_the_main_loop():
+    q = queue.Queue()
+    srv = hook_server.start(q, port=0)
+    port = srv.server_address[1]
+    store = SessionStore()
+    store.apply_event({"hook_event_name": "PermissionRequest", "session_id": "aaaa1111",
+                       "cwd": "C:/Repos/x"}, 0)
+
+    import threading
+
+    def main_loop():
+        # Stands in for main.run(): answer each forget with the candidates.
+        for _ in range(2):
+            kind, key, reply = q.get(timeout=5)
+            assert kind == "forget"
+            reply.put([s.session_id for s in store.forget(key, 1)])
+
+    t = threading.Thread(target=main_loop)
+    t.start()
+    try:
+        def forget(key):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/forget",
+                                         data=key.encode(), method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+
+        assert forget("nothing-like-it") == (404, {"matches": []})
+        assert forget("aaaa") == (200, {"ended": ["aaaa1111"]})
+    finally:
+        t.join()
+        srv.shutdown()

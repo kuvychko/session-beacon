@@ -149,6 +149,7 @@ stateDiagram-v2
     WAITING --> ENDED: SessionEnd
     ERROR --> ENDED: SessionEnd
     STALE --> ENDED: SessionEnd
+    STALE --> ENDED: process exited, or /forget
     ENDED --> [*]: after grace period
 ```
 
@@ -237,6 +238,36 @@ ladder about ten minutes after its `idle_prompt`, and the next event of any kind
 including a late `idle_prompt`, moves the row on. `STARTING` is included on the same
 terms; a session opened and closed before its first prompt otherwise sat grey for a
 day.
+
+**A killed session ends when its process does.** Closing a window or ending the
+process sends no `SessionEnd`, so a killed session went `stale` or rode the ladder
+down to `wait`, and then stayed on screen until the 24-hour ghost cutoff, looking
+exactly like a session parked on purpose. No timeout can fix that, because silence
+is all a timeout has and silence is the same in both cases. So the daemon now asks
+the OS instead.
+
+No hook payload carries a PID, and the hooks are left alone. The forwarder is
+`curl.exe`, which stays connected while its request is handled. The TCP table names
+curl's PID, and walking up the process tree (curl, a shell or two, then `claude.exe`)
+reaches the process that owns the session. `procwatch.py` does this once per session
+and again on every `SessionStart`, because a resumed session runs in a new process.
+It does not run on tool events: it costs tens of milliseconds on the hook's clock.
+Every 30 s the main loop checks each known PID, and a process that has definitely
+exited ends its session as a `SessionEnd` would. The row reads `end` and is gone 30 s
+later.
+
+Windows recycles PIDs, so a PID is only trusted together with its creation time.
+The walk also stops at any "parent" younger than its child, since that is a
+parent PID that has been reused. Anything short of a definite answer (access
+denied, an unknown PID, a chain that does not reach `claude.exe` or `node.exe`)
+counts as alive. The check can only shorten the wait, never lengthen it. A wrong
+"alive" costs nothing new, because the 24-hour cutoff still applies, while a wrong
+"dead" would hide a session that may be waiting on you.
+
+`POST /forget` is the manual override for anything the check cannot see. Its body
+is a session id prefix of at least four characters or an exact label, as `/health`'s
+`rows` show them, and it ends exactly one session or none. An ambiguous key returns
+409 with the candidates rather than a guess.
 
 `ERROR` exists because without it a rate-limited session keeps looking busy until the staleness timer fires minutes later, which reads as a dead editor rather than as something that stopped and is waiting for you. Sort order puts it just below the red rungs of the attention ladder.
 

@@ -102,6 +102,11 @@ class Session:
     # red at all. tick() releases it when the count retires.
     idle_held: bool = False
     idle_held_agent: str = ""
+    # The Claude Code process behind the session, found by the daemon from the
+    # hook's own TCP connection (procwatch.py); 0 if it could not be. Keyed by
+    # creation time too, because Windows recycles PIDs.
+    pid: int = 0
+    pid_created: float = 0.0
 
     def set_state(self, new: State, now: float) -> None:
         if new != self.state:
@@ -155,18 +160,26 @@ class SessionStore:
 
     # ---- inputs ----
 
-    def apply_event(self, ev: dict[str, Any], now: float) -> None:
+    def apply_event(self, ev: dict[str, Any], now: float,
+                    proc: tuple[int, float] | None = None) -> None:
         """Apply one hook payload as sent by Claude Code.
 
         Field names follow the documented hook input schema. Note that
         SessionStart carries `session_start_reason` and SessionEnd carries
         `session_end_reason`; neither is a plain `source` or `reason`.
+
+        `proc` is the (pid, creation time) of the process that sent the event,
+        when the daemon could resolve it. Only SessionStart replaces one already
+        known: a resumed session runs in a new process, while any other event
+        is at best the same answer again.
         """
         sid = ev.get("session_id")
         if not sid:
             return
         name = ev.get("hook_event_name", "")
         s = self._get_or_create(sid, ev.get("cwd", ""), now)
+        if proc and (name == "SessionStart" or not s.pid):
+            s.pid, s.pid_created = proc
         if mode := ev.get("permission_mode"):
             s.permission_mode = mode
 
@@ -379,6 +392,44 @@ class SessionStore:
         s.ctx_pct = extract_ctx_pct(st)
         if rl := extract_rate_limits(st):
             self.rate_limits, self.rate_limits_at = rl, now
+
+    def process_gone(self, sid: str, now: float) -> bool:
+        """The session's process has exited: treat it as a SessionEnd.
+
+        A killed session sends nothing, so before this its row went stale and
+        then sat there until the 24-hour ghost cutoff. The caller must only say
+        "gone" when the OS says so for certain; see procwatch.alive().
+        """
+        s = self.sessions.get(sid)
+        if s is None or s.state == State.ENDED:
+            return False
+        s.set_state(State.ENDED, now)
+        return True
+
+    def forget(self, key: str, now: float) -> list[Session]:
+        """End the session named by `key`, on request. Returns the candidates.
+
+        `key` is a `session_id` prefix of at least four characters -- the eight
+        the display and snapshots show are enough -- or an exact label, which is
+        what /health's `rows` show. Nothing is ended unless exactly one live
+        session matches, so an ambiguous label hides nothing. The escape hatch
+        for whatever the process check cannot see.
+        """
+        key = key.strip()
+        if not key:
+            return []
+        live = [s for s in self.sessions.values() if s.state != State.ENDED]
+        hits = [s for s in live if len(key) >= 4 and s.session_id.startswith(key)]
+        if not hits:
+            hits = [s for s in live if key in (s.label, elide_label(s.label))]
+        if len(hits) == 1:
+            hits[0].set_state(State.ENDED, now)
+        return hits
+
+    def watched(self) -> dict[str, tuple[int, float]]:
+        """Sessions whose process is known, for the liveness poll."""
+        return {sid: (s.pid, s.pid_created) for sid, s in self.sessions.items()
+                if s.pid and s.state != State.ENDED}
 
     def tick(self, now: float) -> None:
         """Advance time: retire background counts, walk the ladder, mark stale."""

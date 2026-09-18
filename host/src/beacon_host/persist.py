@@ -51,10 +51,15 @@ FORMAT_V = 1
 # Code may never send another. Restoring it alongside a forgotten count means
 # the first tick() releases it and the row goes red -- which is true: the
 # session is waiting on you, and it was waiting before the restart.
+#
+# `pid` and `pid_created` are here because a parked session sends nothing that
+# would let the daemon find its process again. The boot check in load() already
+# discards every PID from before a restart.
 _FIELDS = (
     "session_id", "cwd", "label", "state_since", "last_event",
     "last_tool", "model", "cost_usd", "ctx_pct", "permission_mode",
     "error_type", "attn_agent", "idle_held", "idle_held_agent",
+    "pid", "pid_created",
 )
 
 

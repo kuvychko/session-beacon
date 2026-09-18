@@ -121,6 +121,13 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   a `SessionEnd`, and before these two checks it stayed on the display for 45
   hours. Keep both: the boot check misses Fast Startup, and the cutoff alone
   shows a ghost for a day.
+- A session's PID is found by the daemon (`procwatch.py`), from the TCP peer of
+  the hook's `curl.exe` and its ancestors. It is never sent by the hooks, so do
+  not add it to the hook commands. The lookup runs once per session and on every
+  `SessionStart`, never on tool events, and only `SessionStart` may replace a
+  known PID. `procwatch.alive()` returns None for anything inconclusive, and
+  None must count as alive. Only a definite "gone" may end a session, because a
+  wrong "dead" hides a session that may be waiting on you.
 - `POST /event` must reply with an empty body. Claude Code feeds some hooks' stdout back into the session as context.
 - The daemon reads `host/config.local.toml` or `host/config.toml`. Both are gitignored. Do not narrow this back to one name: the other is the one people reach for, and silently ignoring it is indistinguishable from a broken daemon.
 - A blank display with the daemon connected almost always means the hooks are not installed. `/health` reports `events_received` so this is one curl away.
@@ -153,6 +160,7 @@ From the repository root, not `host/`:
 
 ```powershell
 curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device, heartbeat
+curl.exe -s --data-binary <id-or-label> http://127.0.0.1:47391/forget   # end a row by hand
 ./scripts/install-hooks.ps1          # Claude Code hooks; -Uninstall to remove
 ./scripts/install-task.ps1           # run at logon; -Uninstall to remove
 ./scripts/restart-daemon.ps1         # restart under the task and verify; -StopOnly to free the ports

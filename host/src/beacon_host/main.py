@@ -23,7 +23,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import hook_server, persist
+from . import hook_server, persist, procwatch
 from .capture import Capture
 from .config import Config, default_config_path, default_state_path
 from .serial_link import SerialLink
@@ -35,6 +35,7 @@ TICK_S = 0.05        # main loop granularity
 PUSH_EVERY_S = 1.0   # resend at least this often so on-device timers advance
 SAVE_EVERY_S = 5.0   # floor on how often session state is written to disk
 BIND_RETRY_S = 5.0   # how long to wait out a predecessor still shutting down
+LIVENESS_EVERY_S = 30.0  # how often each session's process is checked
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -191,6 +192,8 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
     last_save = 0.0
     events_received = 0
     last_event_at: float | None = None
+    last_liveness = 0.0
+    pid_ended = 0
     warned_no_events = False
     started = time.time()
     try:
@@ -199,15 +202,26 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
             changed = False
             while True:
                 try:
-                    kind, payload = q.get_nowait()
+                    kind, payload, extra = q.get_nowait()
                 except queue.Empty:
                     break
+                if kind == "forget":
+                    hits = store.forget(payload, now)
+                    if len(hits) == 1:
+                        log.info("session %s (%s) ended on request",
+                                 hits[0].session_id[:8], hits[0].label)
+                        hook_server.retry_session(hits[0].session_id)
+                    # Full ids: a 409 exists to tell candidates apart, and two
+                    # sessions can share both a label and an 8-char prefix.
+                    extra.put([f"{h.session_id}:{h.label}" for h in hits])
+                    changed = True
+                    continue
                 if capture:
                     capture.write(kind, payload)
                 if kind == "event":
                     log.debug("event %s %s", payload.get("hook_event_name"),
                               payload.get("session_id", "")[:8])
-                    store.apply_event(payload, now)
+                    store.apply_event(payload, now, extra)
                     events_received += 1
                     last_event_at = now
                 else:
@@ -232,6 +246,19 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
                 link.poll()
                 hook_server.set_device(link.device_state(), link.heartbeat_report())
 
+            # A killed session sends no SessionEnd, and silence alone cannot
+            # tell it from a parked one. Its process can: only a definite "gone"
+            # ends it, and anything inconclusive leaves the 24-hour cutoff to it.
+            if now - last_liveness >= LIVENESS_EVERY_S:
+                last_liveness = now
+                for sid, (pid, created) in store.watched().items():
+                    if (procwatch.alive(pid, created) is False
+                            and store.process_gone(sid, now)):
+                        pid_ended += 1
+                        log.info("session %s (%s) ended: process %d has exited",
+                                 sid[:8], store.sessions[sid].label, pid)
+                        changed = True
+
             store.tick(now)
             snap = store.snapshot(now)
             # Compare without the timestamp so a quiet minute is not a redraw.
@@ -248,6 +275,10 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
                     last_event_age_s=(round(now - last_event_at, 1)
                                       if last_event_at else None),
                     uptime_s=round(now - started, 1),
+                    # Sessions whose process is known, so a kill is noticed
+                    # within LIVENESS_EVERY_S instead of the 24-hour cutoff.
+                    watched=len(store.watched()),
+                    pid_ended=pid_ended,
                     # What is actually on the display. Answering "why does the
                     # screen say that" should not need a serial cable.
                     rows=[f"{r['l']}:{r['st']}:{r['age']}s" for r in snap["s"]],
