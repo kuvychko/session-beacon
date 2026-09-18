@@ -290,7 +290,7 @@ firmware/tft_smoketest/   Standalone wiring/display test, flash this first
 host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/
 hooks/                    Example Claude Code settings, plus a payload capture tool
-scripts/                  install-hooks.ps1, install-task.ps1, uninstall.ps1
+scripts/                  install-hooks.ps1, install-task.ps1, restart-daemon.ps1, uninstall.ps1
 enclosure/                Three printed parts plus an optional stand: SolidWorks source, STEP, and 3MF
 photos/                   Build and finished-device photos, and UI screenshots
 docs/                     Architecture, hardware, enclosure, protocol, integration, roadmap
@@ -336,10 +336,17 @@ random and neither would show the whole picture. If you have already reached
 step 5, stop the scheduled task first and start it again afterwards:
 
 ```powershell
-Stop-ScheduledTask -TaskName SessionBeacon
+./scripts/restart-daemon.ps1 -StopOnly    # from the repository root
 # ... run the daemon in the foreground ...
-Start-ScheduledTask -TaskName SessionBeacon
+./scripts/restart-daemon.ps1
 ```
+
+Use that script for every restart, and never start the daemon with
+`Start-Process`: the Scheduled Task cannot stop a daemon it did not launch, so
+the next restart through the task quietly fails. The script stops every
+beacon-host process however it was started, and fails unless a fresh daemon
+answers `/health`. Stop it the same way before flashing firmware, because the
+daemon holds the COM port.
 
 ### 3. Terminal 1: start the daemon and leave it running
 
@@ -380,7 +387,7 @@ logon instead, with no console:
 
 ```powershell
 ./scripts/install-task.ps1           # from the repository root
-Start-ScheduledTask -TaskName SessionBeacon
+./scripts/restart-daemon.ps1         # starts it now, and confirms it answers
 ```
 
 To undo all of it, including the hooks, the scheduled task, the running daemon

@@ -19,10 +19,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common.ps1")
 
 if ($Uninstall) {
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    # schtasks.exe, not Get-ScheduledTask: see common.ps1 for why.
+    if (Test-BeaconTask -TaskName $TaskName) {
+        if ((Invoke-Schtasks /Delete /TN $TaskName /F) -ne 0) {
+            throw "schtasks /Delete /TN $TaskName failed."
+        }
         Write-Host "Removed scheduled task '$TaskName'."
     } else {
         Write-Host "No scheduled task named '$TaskName'."
@@ -59,5 +63,5 @@ Write-Host "Registered '$TaskName' to start at logon."
 Write-Host "  python : $pythonw"
 Write-Host "  logs   : $logFile"
 Write-Host ""
-Write-Host "Start it now with:  Start-ScheduledTask -TaskName $TaskName"
+Write-Host "Start it now with:  ./scripts/restart-daemon.ps1"
 Write-Host "Check it with:      curl.exe -s http://127.0.0.1:47391/health"

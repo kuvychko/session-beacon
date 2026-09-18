@@ -2,12 +2,14 @@
 
 import json
 import logging
+import os
 import queue
+import socket
 import urllib.request
 
 from beacon_host import hook_server
 from beacon_host.config import Config
-from beacon_host.main import setup_logging
+from beacon_host.main import describe_port_holder, setup_logging
 from beacon_host.state import SessionStore
 from beacon_host.statusline import compose
 
@@ -180,6 +182,7 @@ def test_health_reports_event_count():
         with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
             h = json.loads(r.read())
         assert h["events_received"] == 0 and h["sessions"] == 0 and h["device"] is True
+        assert h["pid"] == os.getpid()
 
         hook_server.set_stats(sessions=2, events_received=17, last_event_age_s=0.4)
         with urllib.request.urlopen("http://127.0.0.1:47457/health", timeout=2) as r:
@@ -247,3 +250,26 @@ def test_second_daemon_cannot_steal_the_port():
     finally:
         first.shutdown()
         first.server_close()
+
+
+def test_a_lost_bind_names_the_daemon_holding_the_port():
+    """A daemon started by hand is invisible to the Scheduled Task, so the
+    task's own copy dies on the bind. The log has to say which PID to clear."""
+    srv = hook_server.start(queue.Queue(), port=0)
+    try:
+        hook_server.set_stats(uptime_s=12.5)
+        msg = describe_port_holder(srv.server_address[1])
+        assert f"PID {os.getpid()}" in msg and "12.5" in msg
+        assert "restart-daemon.ps1" in msg
+    finally:
+        hook_server.set_stats()
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_lost_bind_to_something_else_says_so():
+    with socket.socket() as other:
+        other.bind(("127.0.0.1", 0))
+        other.listen()
+        # Listening but never answering HTTP: the probe times out or is refused.
+        assert "not beacon-host" in describe_port_holder(other.getsockname()[1])

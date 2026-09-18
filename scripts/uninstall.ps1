@@ -39,6 +39,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common.ps1")
 $repo = Split-Path -Parent $PSScriptRoot
 $done = [System.Collections.Generic.List[string]]::new()
 $skipped = [System.Collections.Generic.List[string]]::new()
@@ -48,10 +49,7 @@ Write-Host ""
 
 # ---- 1. Stop the daemon -----------------------------------------------------
 # It holds the COM port and would keep running after everything else is gone.
-$procs = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.Name -eq "beacon-host.exe" -or
-    ($_.CommandLine -and $_.CommandLine -like "*beacon_host*" -and $_.Name -like "py*")
-})
+$procs = @(Get-BeaconDaemonProcess)
 if ($procs.Count -gt 0) {
     foreach ($p in $procs) {
         if ($PSCmdlet.ShouldProcess("PID $($p.ProcessId) ($($p.Name))", "Stop process")) {
@@ -64,10 +62,16 @@ if ($procs.Count -gt 0) {
 }
 
 # ---- 2. Scheduled task ------------------------------------------------------
-if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+# schtasks.exe, not Get-ScheduledTask. The cmdlet fails whenever any task on
+# the machine is malformed, and under SilentlyContinue that failure read as
+# "no such task": this step reported the task absent and left it registered.
+if (Test-BeaconTask -TaskName $TaskName) {
     if ($PSCmdlet.ShouldProcess($TaskName, "Unregister scheduled task")) {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-        $done.Add("removed scheduled task '$TaskName'")
+        if ((Invoke-Schtasks /Delete /TN $TaskName /F) -eq 0) {
+            $done.Add("removed scheduled task '$TaskName'")
+        } else {
+            $skipped.Add("could not remove scheduled task '$TaskName' (schtasks /Delete failed)")
+        }
     }
 } else {
     $skipped.Add("no scheduled task named '$TaskName'")

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import queue
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -85,8 +86,14 @@ class _Handler(BaseHTTPRequestHandler):
         # `device` means the board answered recently, not that its port is open.
         # A hung board keeps both its port and its last frame, and reporting the
         # port had /health say "device": true through a seven-hour freeze.
+        #
+        # `pid` names the process actually holding the port. A daemon launched
+        # by hand rather than by the Scheduled Task looks exactly like the
+        # task's own until you try to restart it, and the task then has nothing
+        # to stop and its fresh copy loses the bind.
         cls = type(self)
-        body = json.dumps({"ok": True, "device": cls.device_state == "ok",
+        body = json.dumps({"ok": True, "pid": os.getpid(),
+                           "device": cls.device_state == "ok",
                            "device_state": cls.device_state,
                            "heartbeat": cls.heartbeat, **cls.stats}).encode()
         self._send(200, body, "application/json")

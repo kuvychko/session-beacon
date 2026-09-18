@@ -155,13 +155,29 @@ From the repository root, not `host/`:
 curl.exe -s http://127.0.0.1:47391/health   # events_received, sessions, device, heartbeat
 ./scripts/install-hooks.ps1          # Claude Code hooks; -Uninstall to remove
 ./scripts/install-task.ps1           # run at logon; -Uninstall to remove
+./scripts/restart-daemon.ps1         # restart under the task and verify; -StopOnly to free the ports
 ./scripts/uninstall.ps1 -WhatIf      # undo everything; supports -WhatIf
 ```
 
-Running the daemon in the foreground needs the port, so stop the scheduled task
-first if it is installed: `Stop-ScheduledTask -TaskName SessionBeacon`, and
-`Start-ScheduledTask` afterwards. Two daemons no longer share a port, so the
-second one exits rather than quietly splitting the hook events.
+Restart the daemon only with `scripts/restart-daemon.ps1`. Never start it with
+`Start-Process`, `pythonw -m beacon_host.main` or anything else outside the
+Scheduled Task: the task cannot stop a process it did not launch, so the next
+`Stop-ScheduledTask` does nothing and the task's own copy dies on the port
+bind. That happened after a firmware flash and showed up only as `/health`'s
+`uptime_s` refusing to reset. The script kills every beacon-host process however
+it was started, starts the task, and fails unless a fresh daemon answers.
+
+Anything that needs the COM port or the HTTP port to itself -- flashing, or
+running the daemon in the foreground -- goes between
+`./scripts/restart-daemon.ps1 -StopOnly` and `./scripts/restart-daemon.ps1`.
+Two daemons do not share a port, so a second one exits, and its log line names
+the PID holding it.
+
+Scripts look tasks up with `schtasks.exe`, never `Get-ScheduledTask`. On this
+machine the cmdlet fails for every task because some unrelated task's XML is
+malformed, and under `-ErrorAction SilentlyContinue` that reads as "no such
+task": the uninstaller reported SessionBeacon absent and left it registered.
+The helpers are in `scripts/common.ps1`.
 
 Hooks are read at session start. After `install-hooks.ps1` the user must
 restart their Claude Code sessions or nothing will arrive.
@@ -171,7 +187,9 @@ Firmware builds headlessly with the arduino-cli bundled inside the Arduino IDE i
 ```powershell
 $cli = "$env:LOCALAPPDATA/Programs/Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe"
 & $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
+./scripts/restart-daemon.ps1 -StopOnly   # the daemon holds COM4
 & $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
+./scripts/restart-daemon.ps1             # never Start-Process
 & $cli board list        # find the port if COM4 has moved
 ```
 

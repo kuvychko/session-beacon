@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import http.client
 import json
 import logging
 import logging.handlers
@@ -19,6 +20,7 @@ import queue
 import signal
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from . import hook_server, persist
@@ -94,6 +96,31 @@ def setup_logging(cfg: Config) -> None:
         logging.getLogger("beacon_host").warning(problem)
 
 
+def describe_port_holder(port: int) -> str:
+    """Say who holds the HTTP port, for the error logged when the bind fails.
+
+    Asking the holder beats asking the OS: if it answers /health it is a
+    beacon-host and reports its own PID, which is the one fact needed to clear
+    it. The case that forced this was a daemon started by hand with
+    Start-Process: the Scheduled Task did not own it, so Stop-ScheduledTask
+    left it running and the task's fresh copy died here with nothing in the
+    log to say which process to look for.
+    """
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as r:
+            h = json.loads(r.read())
+    except (OSError, http.client.HTTPException, ValueError):
+        # URLError, a reset and a timeout are OSError; HTTPException is a
+        # listener that does not speak HTTP; ValueError is a body that is not
+        # JSON. Whichever it is, the holder is not a beacon-host.
+        return "Something that is not beacon-host holds it."
+    pid = h.get("pid", "?") if isinstance(h, dict) else "?"
+    up = h.get("uptime_s", "?") if isinstance(h, dict) else "?"
+    return (f"beacon-host PID {pid} already holds it (up {up}s). If the "
+            "Scheduled Task did not start that one, stopping the task will not "
+            "stop it: use scripts/restart-daemon.ps1.")
+
+
 def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
         persist_state: bool = True) -> int:
     stopping = False
@@ -123,8 +150,8 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
             break
         except OSError as e:
             if time.time() >= deadline:
-                log.error("cannot bind 127.0.0.1:%d (%s). Another beacon-host "
-                          "running?", cfg.http_port, e)
+                log.error("cannot bind 127.0.0.1:%d (%s). %s", cfg.http_port, e,
+                          describe_port_holder(cfg.http_port))
                 return 1
             time.sleep(0.25)
     log.info("listening on 127.0.0.1:%d", cfg.http_port)
