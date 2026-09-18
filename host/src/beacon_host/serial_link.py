@@ -55,6 +55,20 @@ def find_port() -> str | None:
     return None
 
 
+def _wedge_detail(hb: dict[str, Any]) -> str:
+    """What the board saw during the episode its last self-reboot ended."""
+    cause, flips = hb.get("wcause"), hb.get("wflip")
+    if cause == "det":
+        what = "the board believed no host held the port"
+    elif cause == "att":
+        what = "the port was held but nothing it wrote was being collected"
+    else:
+        return "firmware too old to say why"
+    if isinstance(flips, int) and flips:
+        what += f", and that flag changed {flips} time(s) during it"
+    return what
+
+
 class DeviceHealth:
     """What the heartbeats say about the board. Pure: the caller passes the clock.
 
@@ -95,12 +109,14 @@ class DeviceHealth:
         # kept across the reboot that performs one, so a rise here is the only
         # report anyone gets that an episode happened at all: the board was
         # rendering the whole time, and by now it is answering again.
+        # `wcause` and `wflip` (0.2.2) say what the episode looked like from
+        # the board, which nothing on this side can see.
         w, prev_w = msg.get("wedge"), (prev or {}).get("wedge")
         if isinstance(w, int) and isinstance(prev_w, int) and w > prev_w:
             log.warning("beacon rebooted itself to recover its serial return "
-                        "path (%d time(s) so far). The display was never "
+                        "path (%d time(s) so far; %s). The display was never "
                         "frozen. If this repeats, turn off USB selective "
-                        "suspend for the port.", w)
+                        "suspend for the port.", w, _wedge_detail(msg))
         self.last_hb = msg
         self.last_hb_at = now
         return True
@@ -124,7 +140,7 @@ class DeviceHealth:
                 "beacon on %s has sent no heartbeat for %ds with the port open "
                 "(last: fw %s, up %ss, rx %s). Either the firmware has stopped, "
                 "or only its return path has and the display is still fine; "
-                "from here the two are identical. Firmware 0.2.1 reboots itself "
+                "from here the two are identical. Firmware 0.2.2 reboots itself "
                 "out of both within a minute. On an older one, or if this "
                 "persists, replug the board.",
                 self.port or "?", int(self.timeout_s), hb.get("fw", "?"),
@@ -141,7 +157,8 @@ class DeviceHealth:
         """The last heartbeat's counters, for /health."""
         if self.last_hb is None or self.last_hb_at is None:
             return None
-        keys = ("fw", "up", "rx", "bad", "drop", "txdrop", "aflip", "wedge", "rst")
+        keys = ("fw", "up", "rx", "bad", "drop", "txdrop", "aflip", "wedge",
+                "wcause", "wflip", "rst")
         out = {k: self.last_hb[k] for k in keys if k in self.last_hb}
         out["age_s"] = round(now - self.last_hb_at, 1)
         return out

@@ -123,6 +123,22 @@ def test_a_recovered_return_path_is_reported_once(caplog):
     assert any("rebooted after 900s up" in m for m in msgs)
 
 
+def test_a_recovery_says_which_side_of_the_flag_it_was_on(caplog):
+    """0.2.2 records what the episode looked like, so the next one tells a
+    stale attach flag from a pipe that stopped draining under a true one."""
+    h = DeviceHealth()
+    with caplog.at_level(logging.WARNING):
+        h.on_line(hb(900, wedge=0), 0.0)
+        h.on_line(hb(2, wedge=1, wcause="att", wflip=0), 40.0)
+        h.on_line(hb(700, wedge=1, wcause="att", wflip=0), 740.0)
+        h.on_line(hb(3, wedge=2, wcause="det", wflip=7), 780.0)
+    msgs = [r.getMessage() for r in caplog.records if "return path" in r.getMessage()]
+    assert len(msgs) == 2
+    assert "nothing it wrote was being collected" in msgs[0] and "changed" not in msgs[0]
+    assert "no host held the port" in msgs[1] and "changed 7 time(s)" in msgs[1]
+    assert h.report(780.0)["wcause"] == "det" and h.report(780.0)["wflip"] == 7
+
+
 def test_an_unchanged_wedge_count_says_nothing(caplog):
     """It is kept across reboots, so only a rise is news."""
     h = DeviceHealth()

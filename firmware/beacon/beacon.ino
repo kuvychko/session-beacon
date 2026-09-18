@@ -14,6 +14,8 @@
 //   live   leave demo mode
 //   hang   stop loop() on purpose, to check the watchdog reboots the board
 //   wedge  pretend the host detached, to check the TX watchdog reboots it
+//   stall  pretend the pipe stopped draining with the host still attached,
+//          to check the TX watchdog reboots it from that side too
 //   ?      command list
 
 #include <SPI.h>
@@ -75,7 +77,7 @@ static void applyPanelColorOrder() {
 }
 
 // ---- Constants ----
-static constexpr const char* FW_VERSION = "0.2.1";
+static constexpr const char* FW_VERSION = "0.2.2";
 static constexpr uint8_t  PROTOCOL_V    = 1;
 static constexpr uint32_t BAUD          = 115200;
 static constexpr size_t   LINE_BUF      = 1024;
@@ -263,7 +265,12 @@ uint32_t txDropped = 0;  // lines lost to a stalled pipe with a host attached
 // both return 0 while it is false, so no byte can leave this board by any route
 // the sketch controls. txWatchdog() cures it instead, by rebooting.
 static bool forceDetached = false;  // `wedge` command; bench test only
+static bool forceStalled = false;   // `stall` command; bench test only
 static bool hostAttached() { return tud_cdc_n_connected(0) && !forceDetached; }
+
+// Set whenever a byte actually leaves, and consumed by txWatchdog(). This, not
+// hostAttached(), is what the watchdog trusts: see the note there.
+static bool txProgressed = false;
 
 static void txLine(const char* s) {
   // No host holding the port: nothing will read it, and counting these would
@@ -285,12 +292,14 @@ static void txLine(const char* s) {
 static void txPump() {
   if (txHead == txTail) return;
   if (!hostAttached()) { txHead = txTail = 0; return; }
-  const int room = Serial.availableForWrite();
+  const int room = forceStalled ? 0 : Serial.availableForWrite();
   if (room <= 0) return;
   size_t n = txTail - txHead;
   if (n > (size_t)room) n = (size_t)room;
   // Never more than the free space, so write() cannot reach its waiting loop.
-  txHead += Serial.write((const uint8_t*)(txBuf + txHead), n);
+  const size_t sent = Serial.write((const uint8_t*)(txBuf + txHead), n);
+  txHead += sent;
+  if (sent) txProgressed = true;
 }
 
 // Why this boot happened, for the heartbeat. A `task_wdt` or `panic` here is
@@ -353,35 +362,64 @@ static inline bool elapsed(uint32_t now, uint32_t since, uint32_t ms) {
 // the missing heartbeat and reports a stuck board, which is exactly backwards:
 // the display is the half that still works.
 //
-// Receiving snapshots while hostAttached() says no host is a contradiction, and
-// it is the only evidence of this state anywhere on either side of the link.
-// Held for TX_WEDGE_MS it means the flag is stale rather than the cable being
-// out, and the cure is the one this has been costing users by hand: re-enumerate
-// the device. Rebooting is how, since the host already treats a reboot as an
-// ordinary reconnect, and loop() must not block for seconds so there is nothing
-// gentler to try. `wedge` tests it.
+// Receiving snapshots while not one byte leaves this board is a contradiction,
+// and it is the only evidence of this state anywhere on either side of the
+// link. Held for TX_WEDGE_MS it means the return path is dead rather than the
+// cable being out, and the cure is the one this has been costing users by hand:
+// re-enumerate the device. Rebooting is how, since the host already treats a
+// reboot as an ordinary reconnect, and loop() must not block for seconds so
+// there is nothing gentler to try.
+//
+// The evidence is bytes actually written, never hostAttached(). The first
+// version of this watched the flag, and a board went 5 hours without a
+// heartbeat while rendering every snapshot and never once rebooting: either the
+// flag read true the whole time over a FIFO that never drained, or it flickered
+// back to true more often than every 30 s, and each flicker restarted the
+// count. Progress covers both, and the plain detached case as well, because a
+// board with a host is always sending: a heartbeat is queued every
+// HEARTBEAT_MS. Do not go back to gating this on the flag. `wedge` tests the
+// detached path and `stall` the attached one.
 //
 // The count survives into the next boot in RTC memory and leaves in the
 // heartbeat's `wedge`, because `rst` alone cannot tell this reboot apart from
-// any other and the episode is over by the time anyone can look.
+// any other and the episode is over by the time anyone can look. What the
+// episode looked like goes with it: `wcause` is what hostAttached() read at
+// the moment of the reboot (`det` or `att`), and `wflip` how many times it
+// changed during the episode. A steady `det` is a stale flag, `att` a FIFO
+// that stopped draining, and a high `wflip` a link flapping under USB
+// selective suspend.
 //
 // RTC_NOINIT_ATTR, not RTC_DATA_ATTR: the latter is re-initialised on a
 // software restart, which is precisely the event being counted, so the count
 // would always read 0. The price is that these are undefined after a power-on
 // reset rather than zeroed, hence the cookie and setup()'s check.
 static constexpr uint32_t TX_WEDGE_MS = 30000;
-static constexpr uint32_t WEDGE_COOKIE = 0x57454447;  // 'WEDG'
+static constexpr uint32_t WEDGE_COOKIE = 0x57454448;  // bumped with the layout below
+enum : uint32_t { WEDGE_NONE = 0, WEDGE_DETACHED = 1, WEDGE_ATTACHED = 2 };
 RTC_NOINIT_ATTR uint32_t wedgeCookie;
 RTC_NOINIT_ATTR uint32_t wedgeCures;
+RTC_NOINIT_ATTR uint32_t wedgeCause;  // the last cure's WEDGE_*
+RTC_NOINIT_ATTR uint32_t wedgeFlips;  // attachFlips during the last cure's episode
 uint32_t attachFlips = 0;    // hostAttached() transitions, 1 after a normal connect
 bool attachWas = false;
 uint32_t wedgeSinceMs = 0;   // when the contradiction started; 0 = not in one
+uint32_t wedgeFlipsAtStart = 0;
 
 // Call once, before the first heartbeat can report the count.
 static void wedgeCountBegin() {
   if (wedgeCookie != WEDGE_COOKIE) {  // cold boot: RTC memory holds garbage
     wedgeCookie = WEDGE_COOKIE;
     wedgeCures = 0;
+    wedgeCause = WEDGE_NONE;
+    wedgeFlips = 0;
+  }
+}
+
+static const char* wedgeCauseName() {
+  switch (wedgeCause) {
+    case WEDGE_DETACHED: return "det";
+    case WEDGE_ATTACHED: return "att";
+    default:             return "none";
   }
 }
 
@@ -391,16 +429,25 @@ static void txWatchdog(uint32_t now) {
     attachWas = attached;
     attachFlips++;
   }
+  const bool progressed = txProgressed;
+  txProgressed = false;
   // No recent snapshot means the host really has gone, which is not this fault.
   // A board on a charger sees no host and no traffic, and must not reboot
   // itself every half minute; demo mode drives lastMsgMs itself, so exclude it.
-  if (attached || demoMode || elapsed(now, lastMsgMs, NO_HOST_MS)) {
+  // The timer starts only once both hold, so a host arriving after an hour
+  // away gets the full TX_WEDGE_MS to hear its first heartbeat.
+  if (progressed || demoMode || elapsed(now, lastMsgMs, NO_HOST_MS)) {
     wedgeSinceMs = 0;
     return;
   }
-  if (!wedgeSinceMs) wedgeSinceMs = now | 1;  // 0 is the sentinel, so never store it
+  if (!wedgeSinceMs) {
+    wedgeSinceMs = now | 1;  // 0 is the sentinel, so never store it
+    wedgeFlipsAtStart = attachFlips;
+  }
   if (!elapsed(now, wedgeSinceMs, TX_WEDGE_MS)) return;
   wedgeCures++;
+  wedgeCause = attached ? WEDGE_ATTACHED : WEDGE_DETACHED;
+  wedgeFlips = attachFlips - wedgeFlipsAtStart;
   ESP.restart();
 }
 
@@ -841,7 +888,7 @@ static void demoLoad() {
 }
 
 static void help() {
-  txLine("send a JSON snapshot line, or: demo | live | hang | wedge | ?");
+  txLine("send a JSON snapshot line, or: demo | live | hang | wedge | stall | ?");
 }
 
 static void handleCommand(const char* cmd) {
@@ -866,6 +913,17 @@ static void handleCommand(const char* cmd) {
     const uint32_t t0 = millis();
     while (!elapsed(millis(), t0, 200)) txPump();  // let the reply out first
     forceDetached = true;
+  }
+  else if (!strcmp(cmd, "stall")) {
+    // The other half of the TX watchdog's bench test: hostAttached() stays
+    // true but no byte leaves, as with a FIFO the host has stopped draining.
+    // Heartbeats queue and then drop; about TX_WEDGE_MS later the board
+    // reboots, and the next heartbeat reports `wedge` one higher and `wcause`
+    // as `att`.
+    txLine("pretending the pipe stopped draining; the TX watchdog should reboot this board");
+    const uint32_t t0 = millis();
+    while (!elapsed(millis(), t0, 200)) txPump();  // let the reply out first
+    forceStalled = true;
   }
   else                           help();
 }
@@ -958,11 +1016,12 @@ void loop() {
     if (since < 0) since = 0;
     char hb[256];
     snprintf(hb, sizeof hb,
-             "{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"aflip\":%lu,\"wedge\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
+             "{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"aflip\":%lu,\"wedge\":%lu,\"wcause\":\"%s\",\"wflip\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
              FW_VERSION, (unsigned long)(now / 1000),
              (unsigned long)rxLines, (unsigned long)rxBad,
              (unsigned long)rxDropped, (unsigned long)txDropped,
-             (unsigned long)attachFlips, (unsigned long)wedgeCures, (long)since,
+             (unsigned long)attachFlips, (unsigned long)wedgeCures,
+             wedgeCauseName(), (unsigned long)wedgeFlips, (long)since,
              (unsigned long)lastRenderMs,
 #if USE_HARDWARE_SPI
              "hw",

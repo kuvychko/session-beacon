@@ -48,10 +48,16 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   perfectly, because nothing on the RX side is gated on it. Do not answer that
   by deleting the checks in `txLine()`/`txPump()`: `USBCDC::write()` and
   `availableForWrite()` test the same flag and return 0 while it is false, so
-  that changes nothing. `txWatchdog()` is the cure -- receiving a snapshot
-  while the flag says no host is a contradiction, and after `TX_WEDGE_MS` it
-  reboots the board to re-enumerate. Keep the `NO_HOST_MS` staleness check in
-  it: without that a board on a charger reboots itself every 30 seconds.
+  that changes nothing. `txWatchdog()` is the cure -- receiving snapshots
+  while no byte leaves is a contradiction, and after `TX_WEDGE_MS` it reboots
+  the board to re-enumerate. Its evidence is bytes written (`txProgressed`),
+  not the flag: the version that watched the flag let a board go five hours
+  without a heartbeat and never fired, because the flag read true over a FIFO
+  that never drained or kept flickering back to true. Keep the `NO_HOST_MS`
+  staleness check in it: without that a board on a charger reboots itself
+  every 30 seconds. `wcause`/`wflip` record which fault each cure met, in
+  `RTC_NOINIT_ATTR` like `wedgeCures`; bump `WEDGE_COOKIE` if that layout
+  changes.
 - Nothing on the host may toggle DTR or RTS to revive a silent board. The core
   watches those two lines for a four-step pattern and restarts the chip into
   its bootloader when it sees it. Reopening the port was separately shown not
@@ -200,6 +206,11 @@ $cli = "$env:LOCALAPPDATA/Programs/Arduino IDE/resources/app/lib/backend/resourc
 ./scripts/restart-daemon.ps1             # never Start-Process
 & $cli board list        # find the port if COM4 has moved
 ```
+
+To check the TX watchdog on a flashed board, between the same two
+`restart-daemon.ps1` calls run `uv run --project host python
+scripts/wedge-bench.py COM4 stall`, then the same with `wedge`. Each should
+pass after a reboot about 30 s in.
 
 Required libraries are installed: Adafruit GFX 1.12.4, Adafruit ST7735/ST7789 1.11.0, ArduinoJson 7.4.3.
 

@@ -58,9 +58,9 @@ Backlight brightness 0 to 100. Ignored until BL is wired to a PWM pin.
 ## Device to host (optional)
 
 ```json
-{"t":"hb","fw":"0.2.1","up":3600,"rx":142,"bad":0,"drop":0,"txdrop":0,"aflip":1,"wedge":0,"since":412,"render":28,"spi":"hw","rst":"power"}
+{"t":"hb","fw":"0.2.2","up":3600,"rx":142,"bad":0,"drop":0,"txdrop":0,"aflip":1,"wedge":0,"wcause":"none","wflip":0,"since":412,"render":28,"spi":"hw","rst":"power"}
 ```
-Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0 and `aflip` and `wedge` in 0.2.1; the host treats all four as optional.
+Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0, `aflip` and `wedge` in 0.2.1, and `wcause` and `wflip` in 0.2.2; the host treats all six as optional.
 
 | Field | Meaning |
 |-------|---------|
@@ -72,6 +72,8 @@ Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0 and `aflip`
 | `txdrop` | Outgoing lines dropped because the USB pipe was not draining while a host held the port |
 | `aflip` | Times the device's view of "a host holds the port" has changed since boot. 1 after an ordinary connect. A climbing count is a flapping link |
 | `wedge` | Times the device has rebooted itself to recover a dead serial return path. Kept across that reboot, so it is a lifetime count, not a since-boot one |
+| `wcause` | What the last of those reboots saw, kept with `wedge`: `det` if the device believed no host held the port, `att` if it believed one did but nothing it wrote was being collected, `none` if there has been none |
+| `wflip` | How many times that belief changed during the last such episode. Many means a flapping link rather than a stuck one |
 | `since` | Milliseconds since the last accepted message |
 | `render` | Duration of the most recent repaint, ms |
 | `spi` | `hw` or `sw`, which SPI path is compiled in |
@@ -79,7 +81,7 @@ Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0 and `aflip`
 
 These exist because a quiet host and a device that is dropping or failing to parse lines look identical from the outside: a screen reading "no host".
 
-The host acts on the heartbeat as well as logging it. If the port is open and no heartbeat has arrived for 15 s, counting from the later of the port opening and the last heartbeat, the device state is `silent`. `/health` then reports `"device": false`, the status line says `beacon silent`, and the daemon logs one warning. If `up` goes down between heartbeats, even across a reconnect, the host logs a reboot and its `rst`; if `wedge` goes up, it logs that the board recovered its own return path.
+The host acts on the heartbeat as well as logging it. If the port is open and no heartbeat has arrived for 15 s, counting from the later of the port opening and the last heartbeat, the device state is `silent`. `/health` then reports `"device": false`, the status line says `beacon silent`, and the daemon logs one warning. If `up` goes down between heartbeats, even across a reconnect, the host logs a reboot and its `rst`; if `wedge` goes up, it logs that the board recovered its own return path, and which of `wcause`'s two faults it was.
 
 `silent` does not mean the display has stopped. It means only that nothing is coming back, which is equally consistent with a sketch that has stopped and with a return path that has died under a display still rendering every snapshot it is sent. The host cannot separate those and does not pretend to; the device can, and cures the second itself. See [architecture.md](architecture.md).
 
