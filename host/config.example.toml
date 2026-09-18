@@ -8,6 +8,7 @@ port = "COM4"
 
 http_port = 47391      # must match the URL in the Claude Code hook commands
 stale_after_s = 300    # a busy session with no events for this long goes stale
+idle_stale_s = 600     # so does an idle one: a live session would have notified by now
 
 # A session waiting on you pulses red, then holds a static red, then settles to
 # amber. Both are measured from when it started waiting, not from the previous

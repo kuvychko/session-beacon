@@ -136,6 +136,8 @@ stateDiagram-v2
     NEEDS_LOOK --> IDLE: Stop
     WORKING --> ERROR: StopFailure
     WORKING --> STALE: no event for stale_after_s
+    IDLE --> STALE: no event for idle_stale_s
+    STARTING --> STALE: no event for idle_stale_s
     STALE --> WORKING: PostToolUse / UserPromptSubmit
     ERROR --> WORKING: UserPromptSubmit
     STARTING --> ENDED: SessionEnd
@@ -168,7 +170,7 @@ State semantics:
 | `NEEDS_LOOK` | Claude has gone idle, but a workflow, a background shell or similar is still running. Joins `NEEDS_INPUT` after `look_s` (default 300 s) | cyan |
 | `ERROR` | The turn ended on an API error such as a rate limit or an overload | magenta |
 | `IDLE` | Claude finished its turn, waiting for the next prompt | green |
-| `STALE` | `WORKING` but no event for `stale_after_s` (default 300 s) | amber |
+| `STALE` | Expected to hear from the session and did not: `WORKING` with no event for `stale_after_s` (default 300 s), or `IDLE`/`STARTING` with none for `idle_stale_s` (default 600 s) | amber |
 | `ENDED` | Session closed; kept on screen briefly, then dropped | dim grey |
 
 `Stop` means the turn ended, not that a human is needed: it carries `background_tasks`, and a turn that ends with a subagent still running stays `WORKING`. Calling it `IDLE` let the next `idle_prompt` paint a red row with nothing to act on. See [claude-code-integration.md](claude-code-integration.md#hook-events-we-register).
@@ -217,6 +219,24 @@ and delivered when the hold expires or the count retires, so which side of the
 window it lands on no longer matters and nothing depends on a second one arriving.
 
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
+
+**`STALE` is reachable from `IDLE` and `STARTING` too.** It used to fire only from
+`WORKING`, so a window killed after its turn had ended sat green, age climbing, with
+nothing short of the 24-hour ghost cutoff to remove it. A green row lies about
+liveness more convincingly than any other, because green is exactly what a parked
+live session looks like. What separates the two is the `idle_prompt`: a live session
+sends one a few minutes after its turn ends (183 s in the capture), and that takes
+it off `IDLE`. A row still `IDLE` with no event of any kind for `idle_stale_s`
+therefore has nothing left to send one. The timer runs from `last_event`, so an
+informational notification counts as a sign of life.
+
+It lands on `STALE` rather than a new state because `STALE` already means "expected
+to hear from this session and did not", which is the claim here too, and because a
+wrong guess costs almost nothing: a live parked session reaches amber through the
+ladder about ten minutes after its `idle_prompt`, and the next event of any kind,
+including a late `idle_prompt`, moves the row on. `STARTING` is included on the same
+terms; a session opened and closed before its first prompt otherwise sat grey for a
+day.
 
 `ERROR` exists because without it a rate-limited session keeps looking busy until the staleness timer fires minutes later, which reads as a dead editor rather than as something that stopped and is waiting for you. Sort order puts it just below the red rungs of the attention ladder.
 

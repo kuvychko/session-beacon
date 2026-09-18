@@ -754,7 +754,7 @@ def test_a_session_silent_for_a_day_is_dropped_whatever_its_state():
     """A window killed without a SessionEnd never sends another event, and
     nothing else removes it. One sat on the display for 45 hours."""
     for name, extra in (("UserPromptSubmit", {}),                       # -> stale
-                        ("Stop", {}),                                   # idle
+                        ("Stop", {}),                                   # -> stale
                         ("PermissionRequest", {"tool_name": "Bash"})):  # -> wait
         st = SessionStore(ghost_after_s=86400)
         st.apply_event(ev(name, **extra), 0)
@@ -778,6 +778,62 @@ def test_a_parked_session_that_keeps_being_notified_is_not_a_ghost():
     s = st.sessions["abc12345-0000"]
     assert s.state == State.WAITING
     assert st.snapshot(100000)["s"][0]["age"] == 100000
+
+
+def test_an_idle_session_that_never_notifies_goes_stale():
+    """A window closed mid-idle without a SessionEnd sat green, its age
+    climbing, until the day-long ghost cutoff. A live one would have sent an
+    idle_prompt long before idle_stale_s."""
+    st = SessionStore(idle_stale_s=600)
+    st.apply_event(ev("Stop"), 0)
+    st.tick(600)
+    assert st.sessions["abc12345-0000"].state == State.IDLE
+    st.tick(601)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.STALE
+    assert st.snapshot(700)["s"][0]["age"] == 99
+
+
+def test_a_session_opened_and_closed_before_its_first_prompt_goes_stale():
+    st = SessionStore(idle_stale_s=600)
+    st.apply_event(ev("SessionStart"), 0)
+    st.tick(601)
+    assert st.sessions["abc12345-0000"].state == State.STALE
+
+
+def test_any_event_keeps_an_idle_session_green():
+    """Measured from the last event, so an informational notification is proof
+    of life too."""
+    st = SessionStore(idle_stale_s=600)
+    st.apply_event(ev("Stop"), 0)
+    st.apply_event(ev("Notification", notification_type="auth_success"), 500)
+    st.tick(1000)
+    assert st.sessions["abc12345-0000"].state == State.IDLE
+
+
+def test_a_live_idle_session_is_taken_off_idle_by_its_idle_prompt():
+    """The premise of idle_stale_s: the notification lands first and the row
+    walks the ladder as before, never touching STALE."""
+    st = SessionStore(idle_stale_s=600)
+    st.apply_event(ev("Stop"), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 183)
+    for t in range(184, 2000, 60):
+        st.tick(t)
+    assert st.sessions["abc12345-0000"].state == State.WAITING
+
+
+def test_a_stale_idle_session_recovers_on_its_next_event():
+    st = SessionStore(idle_stale_s=600)
+    st.apply_event(ev("Stop"), 0)
+    st.tick(601)
+    st.apply_event(ev("UserPromptSubmit"), 700)
+    assert st.sessions["abc12345-0000"].state == State.WORKING
+
+    st.apply_event(ev("Stop"), 800)
+    st.tick(1401)
+    # A late idle_prompt still raises the alarm from STALE.
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 1500)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
 
 
 # ---- /health ---------------------------------------------------------------

@@ -145,6 +145,8 @@ stateDiagram-v2
     WORKING --> IDLE: Claude finishes its turn
     WORKING --> ERROR: API error, e.g. a rate limit
     WORKING --> STALE: no activity for 5 min
+    IDLE --> STALE: no word from Claude Code for 10 min
+    STARTING --> STALE: same
     STALE --> WORKING: activity resumes
     WORKING --> ASK: permission prompt or question
     IDLE --> ASK: Claude has waited on you a while
@@ -181,7 +183,7 @@ dropped 30 seconds later.
 | `NEEDS_INPUT` | whole row red, pulsing | Blocked on you. Red at once for a permission prompt or a question dialog; red later for a green row Claude Code has flagged as idle too long | Answer it |
 | `NEEDS_HELD` | whole row red, steady | The same, 2 to 10 minutes in | Answer it |
 | `WAITING` | amber dot, amber age | The same, over 10 minutes in. Sorted below working sessions | Answer it when you get back |
-| `STALE` | amber dot, amber age | Was working, but nothing has been heard for 5 min. Often a closed or crashed window | Check the window |
+| `STALE` | amber dot, amber age | Nothing has been heard for longer than a live session stays quiet: 5 min while working, 10 min while green or grey. Usually a window closed without ending the session | Check the window |
 | `ERROR` | magenta dot, magenta age | The turn ended on an API error such as a rate limit | Retry when you can |
 | `ENDED` | grey label | The session closed | Nothing; the row disappears |
 
@@ -190,7 +192,14 @@ anything has said so. A finished turn (`Stop`) is green, because it is not
 urgent yet. A row turns red when Claude Code says it is blocked: straight away
 for a permission prompt or a dialog, or later through its `idle_prompt`
 notification once a green row has gone unanswered. The beacon keeps no idle
-timer of its own. It turns red only when Claude Code sends that notification.
+timer of its own for red. It turns red only when Claude Code sends that
+notification.
+
+It does notice when that notification never comes. A live session sends it a
+few minutes into the wait, so a green row that has heard nothing at all for 10
+minutes is almost certainly a window closed without ending its session, and it
+turns amber `STALE` instead of staying green for a day. A live parked session
+would have reached amber by then anyway, through the red rungs.
 
 Rows are sorted so the most urgent come first: the red rows, then `ERROR`,
 `NEEDS_LOOK`, `WORKING`, `WAITING`, `STALE`, `STARTING`, `IDLE`. The age on each

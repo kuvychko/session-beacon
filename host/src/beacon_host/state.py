@@ -113,6 +113,14 @@ class Session:
 @dataclass
 class SessionStore:
     stale_after_s: float = 300.0
+    # How long an IDLE or STARTING session may go without any event before it
+    # too is called STALE. A live session that has finished its turn is not
+    # silent for long: Claude Code sends an `idle_prompt` once it has waited a
+    # while (one was captured 183 s after the Stop), and that takes the row off
+    # IDLE. Silence well past that means nothing is left to send one -- a window
+    # closed without SessionEnd, which otherwise sat green, age climbing, until
+    # the day-long ghost cutoff.
+    idle_stale_s: float = 600.0
     # How long a session that wants a human pulses, and how long it stays red at
     # all. Both are measured from when it entered the attention family, so they
     # are absolute positions on the ladder rather than durations of each rung.
@@ -411,6 +419,14 @@ class SessionStore:
                 # Same reasoning as above for a turn that ended and then went
                 # quiet without the count ever being retired.
                 s.set_state(State.IDLE if s.turn_over else State.STALE, now)
+            elif (s.state in (State.IDLE, State.STARTING)
+                  and now - s.last_event > self.idle_stale_s):
+                # The idle_prompt a live session sends never came. STALE, not a
+                # state of its own, because it already means "expected to hear
+                # from this session and did not". A wrong guess is cheap: amber
+                # is what a live parked row reaches anyway, via the ladder, only
+                # a few minutes later, and the next event of any kind fixes it.
+                s.set_state(State.STALE, now)
             elif s.state == State.NEEDS_LOOK and now - s.state_since > self.look_s:
                 # The safety valve. Nothing reports that a workflow ended, so a
                 # soft row cannot wait for proof; left alone this long it joins
