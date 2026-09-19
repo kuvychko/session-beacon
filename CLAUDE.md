@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-A USB desk gadget (Arduino Nano ESP32 + 1.8" ST7735 TFT) that shows the status of every Claude Code session on the PC: which are working, which are blocked on the user, plus cost and context usage. Windows host first.
+A USB desk gadget (Arduino Nano ESP32 or Waveshare RP2040-Zero, + 1.8" ST7735 TFT) that shows the status of every Claude Code session on the PC: which are working, which are blocked on the user, plus cost and context usage. Windows host first.
 
 Read `docs/architecture.md` before changing anything. The protocol in `docs/protocol.md` is the contract between host and firmware; change it in both places and bump `v` for breaking changes.
 
@@ -22,7 +22,16 @@ docs/                        architecture, hardware, enclosure, protocol, claude
 
 ## Conventions
 
-- Firmware uses Arduino pin names (`D10`), never raw GPIO numbers. Wiring is in `docs/hardware.md` and matches the `env_monitoring` project at `C:\Repos\env_monitoring`.
+- There are two builds, Nano ESP32 and RP2040-Zero. They share the display, the protocol,
+  the daemon, `front-v0` and the stand; only the board, its wiring, its mid and back
+  parts and board-specific firmware differ. `main` holds the Nano build until the
+  RP2040 port is finished on its `rp2040-zero` branch. Docs keep shared material once,
+  with a section per board where they differ.
+- Nano firmware uses Arduino pin names (`D10`), never raw GPIO numbers. Its wiring is in `docs/hardware.md` and matches the `env_monitoring` project at `C:\Repos\env_monitoring`.
+- RP2040-Zero wiring is in `docs/hardware.md#rp2040-zero`. Name its pins in docs only by
+  the silkscreen label (`3.3V`, `28`): the board prints bare GPIO numbers, and the
+  header-position numbers in pinout diagrams collide with them. The display is on SPI1,
+  so the constructor must name `&SPI1`.
 - The display panel is BGR-wired, so `applyPanelColorOrder()` must run after every `setRotation()` call. Without it red and blue render swapped. Both panels bought from this listing have been BGR, including `env_monitoring`'s, which had the same bug unnoticed for months. Do not "clean up" that register write.
 - Firmware is dumb: it renders what the host sends. Do not add policy (sorting, thresholds, labels) to the firmware.
 - The firmware drives the TFT over hardware SPI at 24 MHz, chosen by the 3-argument

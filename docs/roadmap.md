@@ -14,7 +14,7 @@ the history.
 uses neither on purpose ([non-goals](architecture.md#non-goals-for-now)). The
 RP2040-Zero is far smaller and cheaper, has USB-C, and uses 3.3 V logic, so the display
 still needs no level shifting. The port notes written before this was planned are in
-[enclosure.md](enclosure.md#if-you-were-starting-from-scratch).
+[enclosure.md](enclosure.md#two-builds).
 
 **Ground rules.**
 
@@ -25,16 +25,20 @@ still needs no level shifting. The port notes written before this was planned ar
 
 **Work.** Each item comes from ESP32-specific code or hardware already in the tree:
 
-- [ ] **Wiring.** Put the display on one of the RP2040's hardware SPI pin sets, using
-  GP-numbered pins where the Nano uses `D8`–`D13`, and document it in
-  [hardware.md](hardware.md#wiring). Confirm that 24 MHz SPI holds and that the panel
-  still needs the BGR `applyPanelColorOrder()` write. The panel decides that, not the
-  microcontroller, but check it on the bench.
+- [ ] **Wiring.** Pins decided and documented in [hardware.md](hardware.md#rp2040-zero):
+  all eight wires on one edge, with the display on SPI1 (`14` SCK, `15` MOSI) and CS,
+  DC and RST on `28`, `27` and `26`. Still open: confirm on the bench that 24 MHz SPI
+  holds and that the panel still needs the BGR `applyPanelColorOrder()` write. The
+  panel decides that, not the microcontroller, but check it.
 - [ ] **USB serial layer.** `beacon.ino` includes `tusb.h` and `esp_system.h`, and calls
   `tud_cdc_n_connected()`, `Serial.setRxBufferSize()` and `esp_reset_reason()`. Those are
   ESP32 core APIs. `txLine()`/`txPump()`/`txWatchdog()` exist because of how *that*
   core's CDC `write()` blocks. Test the RP2040 core's CDC for the same wedge instead of
   assuming the ESP32 findings carry over, in either direction.
+- [ ] **Display bus.** The display is on SPI1, so the constructor must be
+  `Adafruit_ST7735(&SPI1, TFT_CS, TFT_DC, TFT_RST)`. The three-argument form used on
+  the Nano drives SPI0. Decide the pin-name convention for the RP2040 core: the Nano's
+  `D10`-style names do not apply. `tft_smoketest` needs the same changes.
 - [ ] **Watchdog and reset survival.** `enableLoopWDT()` needs the RP2040 hardware
   watchdog in its place. The values that must survive a reboot (`wedgeCures`,
   `wedgeCause` and `wedgeFlips`, which feed the heartbeat's `wedge`, `wcause` and
@@ -47,9 +51,9 @@ still needs no level shifting. The port notes written before this was planned ar
   trigger applies to which board.
 - [ ] **Build and flash.** Pick an arduino-cli FQBN and an upload path (UF2/BOOTSEL), and
   add both to the commands in `CLAUDE.md` next to the Nano's.
-- [ ] **Enclosure.** Design a new case sized to the Zero. Only the display cutout carries
-  over. It is a new part family starting at `-v0`, per
-  [the versioning rule](enclosure.md#versioning).
+- [x] **Enclosure.** `mid-rp2040-v0` and `back-rp2040-v0`, printed and test-fitted.
+  They share `front-v0`, the stand, the M2 x 16 screws and the 40 x 60 x 19 mm envelope
+  with the Nano build. See [enclosure.md](enclosure.md#two-builds).
 - [ ] **Docs.** Add a BOM, the README hardware table, and a photo of the finished unit.
 
 **Open decision:** one sketch with a thin per-board layer, or a separate

@@ -402,7 +402,7 @@ beacon_host/
 
 Threading model: the HTTP server thread pushes events onto a queue. The main loop drains the queue, updates state, ticks staleness, and writes one line to serial if the snapshot changed or one second has passed (so the elapsed timers advance). Serial writes stay single-threaded.
 
-Device discovery: `--port COMx` explicit, else auto-detect by USB VID/PID of the Nano ESP32 (VID 0x2341, PID 0x0070) via pyserial's port listing.
+Device discovery: `--port COMx` explicit, else auto-detect by USB VID/PID of the Nano ESP32 (VID 0x2341, PID 0x0070) via pyserial's port listing. This is the only board-specific part of the host: the protocol and everything behind it are the same for either build, and the RP2040-Zero's IDs are added with its firmware port.
 
 **The daemon will not share its port.** `HTTPServer` sets `allow_reuse_address`, and on Windows `SO_REUSEADDR` lets a *second* process bind an address another process is already listening on — unlike Linux, where it only skips the `TIME_WAIT` delay. So a second daemon started cleanly, the "another beacon-host running?" check never fired, and the two split hook events between them at random. That was easy to hit by accident, because the quick start asks you to run `beacon-host --dry-run -v` and by step 5 the scheduled task is already running. That step now says to stop the task first, and the failure is loud rather than silent either way.
 

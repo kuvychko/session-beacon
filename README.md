@@ -18,16 +18,17 @@ rolling five-hour limit and 52% of the seven-day one.
 
 | Part | Notes |
 |------|-------|
-| Arduino Nano ESP32, **headerless** | ABX00092, not the headered ABX00083. ESP32-S3, native USB CDC, 3.3 V logic. Overkill for this: Wi-Fi is never used, and an RP2040-Zero would be cheaper if you redesign the case |
+| Arduino Nano ESP32, **headerless** | ABX00092, not the headered ABX00083. ESP32-S3, native USB CDC, 3.3 V logic. The reference build, complete and in daily use |
+| *or* Waveshare RP2040-Zero, **without headers** | The cheaper, smaller build, since Wi-Fi is never used. Enclosure printed and fitted, wiring decided, firmware in progress |
 | 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
-| Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. SolidWorks, STEP and 3MF in [`enclosure/`](enclosure) |
+| Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. The middle and back parts come in a version for each board. SolidWorks, STEP and 3MF in [`enclosure/`](enclosure) |
 | Desk stand, 1 printed part, optional | Tilts the screen back 25 degrees. The case is a friction fit in the slot, so nothing fastens it |
 | 4x M2 x 16 socket-head screws + 4x M2 nuts | Head and nut both counter-sunk into the 19 mm stack. Length excludes the head, per the machine screw convention |
 | 26 AWG silicone hookup wire, tinned copper | Eight conductors, soldered direct to the display's bent-over header. Silicone is required, not preferred: PVC is stiff enough to lift the board out of its retaining ridges |
 
-Wiring is carried over from the `env_monitoring` firmware and needs no passives or
-level shifting: eight conductors, all 3.3 V. See
+Wiring needs no passives or level shifting: eight conductors, all 3.3 V. The Nano's
+is carried over from the `env_monitoring` firmware. See
 [docs/hardware.md](docs/hardware.md) for the pinout and bring-up procedure, and
 [docs/enclosure.md](docs/enclosure.md) for the case and the full bill of materials.
 
@@ -274,13 +275,14 @@ Code samples inside the documentation are MIT, not CC BY, so you can copy a pin
 definition or a shell command without attributing anything. Every dependency is
 BSD or MIT, so nothing here constrains what you do with it.
 
-**An RP2040 version is planned.** The Nano ESP32 is overkill for this: its
+**An RP2040 version is in progress.** The Nano ESP32 is overkill for this: its
 Wi-Fi and Bluetooth are most of what you pay for and the project uses neither, by
-design. A Waveshare RP2040-Zero is cheaper and smaller, and a build on it, with its
-own enclosure, is the next item on the [roadmap](docs/roadmap.md#next-rp2040-zero-edition).
-The case is published as STEP as well as mesh, so a redesign of your own does not
-depend on owning SolidWorks or on waiting for me. What a port involves is written up in
-[docs/enclosure.md](docs/enclosure.md#if-you-were-starting-from-scratch).
+design. A Waveshare RP2040-Zero is cheaper and smaller. Its enclosure is printed and
+fitted and its wiring is decided; the firmware is the remaining work, tracked on the
+[roadmap](docs/roadmap.md#next-rp2040-zero-edition). The daemon is the same for both
+boards. How the two builds differ is in
+[docs/enclosure.md](docs/enclosure.md#two-builds). The case is published as STEP as
+well as mesh, so adapting it to another board does not depend on owning SolidWorks.
 
 ## Repository layout
 

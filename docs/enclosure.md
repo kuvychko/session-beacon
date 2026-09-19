@@ -4,12 +4,20 @@ Three printed parts that sandwich the board and display, held together by four s
 through the stack, plus an optional stand that tilts the finished case back 25 degrees.
 Everything is in [`enclosure/`](../enclosure).
 
-| Part | Footprint | Depth |
-|------|-----------|-------|
-| Front | 40 x 60 mm | 5.0 mm |
-| Mid | 40 x 60 mm | 8.0 mm |
-| Back | 40 x 60 mm | 6.0 mm |
-| 25-degree stand (optional) | 38 x 60 mm | 51 mm tall |
+There are two builds, one per board (see [hardware.md](hardware.md)). They share the
+front, the stand, the fasteners and the outside dimensions. Only the mid and back
+parts, which hold the board, are cut for one board or the other.
+
+| Part | Nano ESP32 build | RP2040-Zero build | Footprint | Depth |
+|------|------------------|-------------------|-----------|-------|
+| Front | `front-v0` | `front-v0` | 40 x 60 mm | 5.0 mm |
+| Mid | `mid-v0` | `mid-rp2040-v0` | 40 x 60 mm | 8.0 mm |
+| Back | `back-v0` | `back-rp2040-v0` | 40 x 60 mm | 6.0 mm and 9.0 mm |
+| 25-degree stand (optional) | `25-degree-stand-v0` | `25-degree-stand-v0` | 38 x 60 mm | 51 mm tall |
+
+Both cases have the same 40 x 60 x 19 mm envelope and take the same screws. The depths
+are bounding boxes, and `back-rp2040-v0`'s 9 mm includes ridges that interlock into the
+mid part when assembled, so the parts' depths do not add up to the stack.
 
 ### Which file to open
 
@@ -26,7 +34,7 @@ the format that makes this project actually forkable: a dumb solid is still real
 geometry you can cut, extend and re-export, which a mesh is not. If you are adapting
 the case for a different board, that is where to start.
 
-Stacked depth is 19 mm. The footprint is smaller than the bare display module, which is
+Stacked depth is 19 mm for either build. The footprint is smaller than the bare display module, which is
 56 mm on its long edge, because the panel overhangs its own PCB.
 
 Dimensions above were measured from the mesh bounding boxes in the 3MF files, so they
@@ -37,13 +45,14 @@ elephant's foot on the first layer.
 
 | Qty | Item | Notes |
 |-----|------|-------|
-| 1 | Arduino Nano ESP32, **headerless** | **ABX00092**, not ABX00083. See below |
+| 1 | Arduino Nano ESP32, **headerless** | Nano build. **ABX00092**, not ABX00083. See below |
+| 1 | Waveshare RP2040-Zero, **without headers** | RP2040 build, instead of the Nano. The plain one, not the pre-soldered RP2040-Zero-M. See below |
 | 1 | 1.8" TFT, 128x160, ST7735S, 3.3 V, SPI, 8-pin | [JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Expect BGR wiring; see [hardware.md](hardware.md#panel-colour-order) |
 | 4 | M2 x 16 socket-head cap screws | Counter-sunk into the stack; see below on length |
 | 4 | M2 nuts | |
 | 1 | USB-C cable, data and power | Nothing else connects to the outside |
 | 8 | 26 AWG **silicone**-insulated hookup wire, stranded tinned copper | Board to display. Sold as "Flexible 26 Gauge Silicone Hook up Wire Kit, Electrical Tinned Copper Wire" |
-| 3 | Printed parts | `front`, `mid`, `back` from `enclosure/` |
+| 3 | Printed parts | `front-v0`, plus `mid-v0` and `back-v0` for the Nano or `mid-rp2040-v0` and `back-rp2040-v0` for the RP2040-Zero |
 | 1 | Printed stand, optional | `25-degree-stand` from `enclosure/`. Nothing fastens it; see below |
 
 ## Assembly constraints
@@ -51,7 +60,8 @@ elephant's foot on the first layer.
 ![Inside the case](../photos/assembly1.jpg)
 
 The case is tight, and four things follow from that. None of them are preferences.
-Everything below is visible in the photo above.
+Everything below is visible in the photo above, which is the Nano build, and applies
+to the RP2040-Zero build as well.
 
 **Screw length is quoted under the head.** M2 x 16 means 16 mm of shank; the socket
 head adds roughly 2.5 mm on top, for about 18.5 mm overall. Both the head and the nut
@@ -64,18 +74,20 @@ screw is too long, not flush.
 Socket head rather than hex head, so a driver reaches down into the counterbore
 instead of needing side clearance for a wrench.
 
-**The Arduino must be the headerless board, ABX00092.** Not ABX00083, which is the same
-board with pin headers already soldered on. The two are otherwise identical, so it is an
-easy thing to order wrong. Headers add height the case does not have, and more
-importantly the clamshell ridges close onto the bare PCB to retain the board. There is
-nowhere for a header strip to go.
+**The board must have no headers.** For the Nano that means ABX00092, not ABX00083,
+which is the same board with pin headers already soldered on. The two are otherwise
+identical, so it is an easy thing to order wrong. For the RP2040-Zero it means the plain
+board with its loose header strips left in the bag, not the RP2040-Zero-M, which comes
+with them soldered. Headers add height the case does not have, and more importantly the
+clamshell ridges close onto the bare PCB to retain the board. There is nowhere for a
+header strip to go. Wires are soldered straight to the board's pads.
 
 **The display's 8-pin header is bent through 90 degrees** so the panel sits flat against
 the front while the connections run back into the cavity. Wires are soldered directly to
 those pins. No sockets, no dupont housings; both would add height and neither would
 survive the bend.
 
-**Nothing mechanically fastens the boards.** The clamshell ridges hold the Arduino, and
+**Nothing mechanically fastens the boards.** The clamshell ridges hold the Nano or the RP2040-Zero, and
 the stack holds itself together through the four screws. That works because everything
 inside is thin and nothing pushes back, which is the whole reason the wire specification
 matters.
@@ -153,41 +165,39 @@ are small solid-walled parts with no load path through the infill, so the two ar
 unlikely to differ in any way you could measure. Recorded here because it is what was
 actually run, not because it is a requirement.
 
-## If you were starting from scratch
+## Two builds
 
-**The Nano ESP32 is overkill here.** It was used because it was on hand, and because
-the display wiring was already proven on it in `env_monitoring`. Its Wi-Fi and Bluetooth
-are the reason it costs what it does, and this project uses neither: everything travels
+**The Nano ESP32 build** came first because the board was on hand and the display
+wiring was already proven on it in `env_monitoring`. It is complete, in daily use, and
+the reference the other build is measured against.
+
+**The RP2040-Zero build** exists because the Nano is overkill here. Its Wi-Fi and
+Bluetooth are most of what it costs, and this project uses neither: everything travels
 over USB by design, and [not adding a network](architecture.md#non-goals-for-now) is a
-deliberate choice rather than an unfinished one.
+deliberate choice rather than an unfinished one. A Waveshare RP2040-Zero is far smaller
+and cheaper, has USB-C, and is 3.3 V logic, so the display still needs no level
+shifting.
 
-A **Waveshare RP2040-Zero** would be the better and cheaper choice for a fresh build. It
-is far smaller, it is 3.3 V logic so the display still needs no level shifting, and it
-has USB-C.
+What differs between them:
 
-Two things stand in the way, and both are real work rather than a swap:
+- **Mid and back parts.** The ridges that retain the board are shaped to its outline,
+  so each board has its own pair. The front, the stand, the screws and the outside
+  dimensions are shared.
+- **Wiring.** Same eight display wires, different pads on the board. See
+  [hardware.md](hardware.md#wiring).
+- **Firmware.** Pins, the SPI bus and some USB serial details are board-specific. The
+  host daemon is the same for both.
 
-- **The enclosure would need redesigning.** These parts are cut for the Nano ESP32
-  footprint, and the ridges that retain the board are shaped to that outline. Nothing
-  about the case carries over to a different board except the display cutout.
-- **The firmware needs its pins remapped, and one call checked.** The pin defines are
-  written in Arduino names (`D8` through `D13`) that mean specific GPIOs on the Nano;
-  an RP2040-Zero exposes `GP0` upward and its hardware SPI lands elsewhere.
-  `Serial.setRxBufferSize()` in `setup()` is an ESP32 core API and may not exist on the
-  RP2040 core. Everything else is library-level: Adafruit_GFX, Adafruit_ST7735 and
-  ArduinoJson all support RP2040, and the colour-order fix is a register write that is
-  independent of the microcontroller.
-
-Untested. Nobody has built this on an RP2040-Zero yet; the above is what a port would
-have to deal with, not a report from having done it.
-
-**This is now planned.** An RP2040-Zero build with a dedicated enclosure is the next
-item on the [roadmap](roadmap.md#next-rp2040-zero-edition), which tracks the work.
+Status: the RP2040-Zero case is printed and test-fitted and its wiring is decided. Its
+firmware is in progress, tracked on the [roadmap](roadmap.md#next-rp2040-zero-edition).
+Until that lands, the Nano build is the only one that runs.
 
 ## Versioning
 
 Every part is suffixed `-v0`, the stand included. That is the revision that was fitted
-and works. If a part is revised, add `-v1` rather than overwriting, and revise all three
+and works. A part cut for one board carries the board in its name before the version,
+as in `mid-rp2040-v0`; a part without one, like `front-v0`, is shared by both builds,
+and the Nano's own parts keep the plain names they had before there was a second build. If a part is revised, add `-v1` rather than overwriting, and revise all three
 formats together so they cannot drift apart.
 
 The reason for keeping old versions rather than relying on history: none of these
