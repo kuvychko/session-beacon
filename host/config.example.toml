@@ -2,8 +2,9 @@
 # both are gitignored; config.local.toml wins if you somehow have both.
 # Every value here is optional; these are the defaults.
 
-# COM port. Omit entirely to auto-detect the Nano ESP32 by USB VID/PID, which
-# survives the cable moving to a different physical port.
+# COM port. Omit entirely to auto-detect the board by USB VID/PID, which
+# survives the cable moving to a different physical port. Either build is
+# recognised: the Nano ESP32 and the RP2040-Zero.
 port = "COM4"
 
 http_port = 47391      # must match the URL in the Claude Code hook commands

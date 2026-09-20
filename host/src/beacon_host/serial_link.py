@@ -31,8 +31,15 @@ from serial.tools import list_ports
 
 log = logging.getLogger(__name__)
 
-NANO_ESP32_VID = 0x2341
-NANO_ESP32_PID = 0x0070
+# The boards the beacon firmware runs on, as (VID, PID). The Nano ESP32's pair
+# is its own; the RP2040's is the Raspberry Pi vendor with the generic RP2040
+# product id, which every board built on that chip shares, so this recognises
+# "an RP2040", not specifically a Zero. Detection only picks which port to open:
+# a board that is not a beacon sends no heartbeat and is reported `silent`, and
+# `--port COMx` skips the search entirely.
+NANO_ESP32 = (0x2341, 0x0070)
+RP2040 = (0x2E8A, 0x0003)
+KNOWN_BOARDS = (NANO_ESP32, RP2040)
 BAUD = 115200
 RECONNECT_S = 2.0
 # Five missed heartbeats. Long enough to ride out a slow USB moment, short
@@ -48,9 +55,9 @@ SILENT = "silent"  # port open but no heartbeat: see the note at the top
 
 
 def find_port() -> str | None:
-    """First Nano ESP32 by USB VID/PID, so a moved cable does not need config."""
+    """First known board by USB VID/PID, so a moved cable does not need config."""
     for p in list_ports.comports():
-        if p.vid == NANO_ESP32_VID and p.pid == NANO_ESP32_PID:
+        if (p.vid, p.pid) in KNOWN_BOARDS:
             return p.device
     return None
 
@@ -140,9 +147,9 @@ class DeviceHealth:
                 "beacon on %s has sent no heartbeat for %ds with the port open "
                 "(last: fw %s, up %ss, rx %s). Either the firmware has stopped, "
                 "or only its return path has and the display is still fine; "
-                "from here the two are identical. Firmware 0.2.2 reboots itself "
-                "out of both within a minute. On an older one, or if this "
-                "persists, replug the board.",
+                "from here the two are identical. Firmware 0.2.2 and later "
+                "reboots itself out of both within a minute. On an older one, "
+                "or if this persists, replug the board.",
                 self.port or "?", int(self.timeout_s), hb.get("fw", "?"),
                 hb.get("up", "?"), hb.get("rx", "?"))
         elif st == OK and self._silent:
@@ -157,8 +164,8 @@ class DeviceHealth:
         """The last heartbeat's counters, for /health."""
         if self.last_hb is None or self.last_hb_at is None:
             return None
-        keys = ("fw", "up", "rx", "bad", "drop", "txdrop", "aflip", "wedge",
-                "wcause", "wflip", "rst")
+        keys = ("fw", "board", "up", "rx", "bad", "drop", "txdrop", "aflip",
+                "wedge", "wcause", "wflip", "rst")
         out = {k: self.last_hb[k] for k in keys if k in self.last_hb}
         out["age_s"] = round(now - self.last_hb_at, 1)
         return out

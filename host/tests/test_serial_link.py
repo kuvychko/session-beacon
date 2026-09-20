@@ -101,6 +101,35 @@ def test_other_lines_are_not_heartbeats():
     assert h.report(1.0) is None
 
 
+def test_either_board_is_found_by_its_usb_ids(monkeypatch):
+    """One daemon serves both builds, so detection knows both boards' ids."""
+    from beacon_host import serial_link
+
+    class P:
+        def __init__(self, device, vid, pid):
+            self.device, self.vid, self.pid = device, vid, pid
+
+    def ports(listing):
+        monkeypatch.setattr(serial_link.list_ports, "comports", lambda: listing)
+
+    ports([P("COM3", 0x1A86, 0x7523), P("COM6", *serial_link.RP2040)])
+    assert serial_link.find_port() == "COM6"
+    ports([P("COM4", *serial_link.NANO_ESP32)])
+    assert serial_link.find_port() == "COM4"
+    ports([P("COM3", 0x1A86, 0x7523), P("COM9", None, None)])
+    assert serial_link.find_port() is None
+
+
+def test_report_names_the_board_it_came_from():
+    """0.3.0 says which build sent the heartbeat; older firmware does not."""
+    h = DeviceHealth()
+    h.on_line(hb(5, board="rp2040-zero"), 1.0)
+    assert h.report(1.0)["board"] == "rp2040-zero"
+    h2 = DeviceHealth()
+    h2.on_line(hb(5), 1.0)
+    assert "board" not in h2.report(1.0)
+
+
 def test_report_carries_the_counters_and_their_age():
     h = DeviceHealth()
     h.on_line(hb(36, rx=2, txdrop=3, aflip=1, wedge=0), 10.0)

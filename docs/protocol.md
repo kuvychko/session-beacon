@@ -58,13 +58,14 @@ Backlight brightness 0 to 100. Ignored until BL is wired to a PWM pin.
 ## Device to host (optional)
 
 ```json
-{"t":"hb","fw":"0.2.2","up":3600,"rx":142,"bad":0,"drop":0,"txdrop":0,"aflip":1,"wedge":0,"wcause":"none","wflip":0,"since":412,"render":28,"spi":"hw","rst":"power"}
+{"t":"hb","fw":"0.3.0","board":"rp2040-zero","up":3600,"rx":142,"bad":0,"drop":0,"txdrop":0,"aflip":1,"wedge":0,"wcause":"none","wflip":0,"since":412,"render":1,"spi":"hw","rst":"power"}
 ```
-Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0, `aflip` and `wedge` in 0.2.1, and `wcause` and `wflip` in 0.2.2; the host treats all six as optional.
+Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0, `aflip` and `wedge` in 0.2.1, `wcause` and `wflip` in 0.2.2, and `board` in 0.3.0; the host treats all seven as optional.
 
 | Field | Meaning |
 |-------|---------|
 | `fw` | Firmware version |
+| `board` | Which build sent this: `nano-esp32` or `rp2040-zero`. The rest of the protocol is identical on both |
 | `up` | Seconds since boot |
 | `rx` | Lines accepted |
 | `bad` | Lines that failed to parse |
@@ -77,7 +78,7 @@ Heartbeat every 3 s. `txdrop` and `rst` were added in firmware 0.2.0, `aflip` an
 | `since` | Milliseconds since the last accepted message |
 | `render` | Duration of the most recent repaint, ms |
 | `spi` | `hw` or `sw`, which SPI path is compiled in |
-| `rst` | Why the board last reset: `power`, `sw`, `panic`, `int_wdt`, `task_wdt`, `wdt`, `brownout` or `other`. A watchdog reset or `panic` means the watchdog rescued a hung `loop()`. |
+| `rst` | Why the board last reset. `power`, `sw` (the device's own cure, see `wedge`), `brownout` or `other` on either board; `panic`, `int_wdt`, `task_wdt` or `wdt` on the Nano ESP32; `wdt`, `run_pin`, `debug` or `glitch` on the RP2040-Zero. A watchdog reset or `panic` means the watchdog rescued a hung `loop()`, except on the first boot after flashing an RP2040-Zero, where the bootloader reboots the same way. |
 
 These exist because a quiet host and a device that is dropping or failing to parse lines look identical from the outside: a screen reading "no host".
 

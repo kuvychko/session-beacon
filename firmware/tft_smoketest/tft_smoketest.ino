@@ -3,7 +3,8 @@
 // Standalone sketch to verify the ST7735S wiring and colour mapping before
 // touching beacon.ino. Flash this first.
 //
-// Board:     Arduino Nano ESP32 (Arduino ESP32 Boards package)
+// Boards:    Arduino Nano ESP32 (Arduino ESP32 Boards package), or
+//            Waveshare RP2040-Zero (arduino-pico, rp2040:rp2040)
 // Libraries: Adafruit GFX, Adafruit ST7735 and ST7789
 //
 // This panel is BGR-wired, so the sketch corrects the colour order at init.
@@ -30,14 +31,40 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
-// Arduino pin names, NOT GPIO numbers. See docs/hardware.md.
+// Wiring per board. See docs/hardware.md; the two builds share this panel and
+// differ only in which pins it lands on and which SPI bus drives it.
+#if defined(ARDUINO_ARCH_RP2040)
+// RP2040-Zero. These are the numbers printed on the board, which are GPIO
+// numbers; the header-position numbers in pinout diagrams are something else.
+// All eight wires are on the left edge, looking at the component side with
+// USB-C at the top.
+#define TFT_CS    28
+#define TFT_RST   26
+#define TFT_DC    27
+#define TFT_MOSI  15   // SPI1 TX
+#define TFT_SCLK  14   // SPI1 SCK
+#define TFT_BUS   SPI1
+#define PIN_LABELS "pins: CS=28 DC=27 RST=26 MOSI=15 SCLK=14, VCC=3.3V, BLK=3.3V"
+#else
+// Nano ESP32. Arduino pin names, NOT GPIO numbers.
 #define TFT_CS    D10
 #define TFT_RST   D9
 #define TFT_DC    D8
 #define TFT_MOSI  D11
 #define TFT_SCLK  D13
+#define TFT_BUS   SPI
+#define PIN_LABELS "pins: CS=D10 DC=D8 RST=D9 MOSI=D11 SCLK=D13, VCC=3V3, BLK=3V3"
+#endif
 
+// The RP2040 build drives the panel over hardware SPI1, the bus its pins
+// belong to: the three-argument constructor would drive SPI0, which is not
+// wired. The Nano build keeps the five-argument form, which bit-bangs; this
+// sketch is a wiring test, and beacon.ino is where the speed matters.
+#if defined(ARDUINO_ARCH_RP2040)
+Adafruit_ST7735 tft = Adafruit_ST7735(&TFT_BUS, TFT_CS, TFT_DC, TFT_RST);
+#else
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+#endif
 
 static constexpr int16_t W = 160, H = 128;
 
@@ -295,7 +322,14 @@ void setup() {
   Serial.begin(115200);
   delay(1500);  // give USB CDC time to enumerate before the first print
   Serial.println("\n=== Session Beacon TFT smoke test ===");
-  Serial.println("pins: CS=D10 DC=D8 RST=D9 MOSI=D11 SCLK=D13, VCC=3V3, BLK=3V3");
+  Serial.println(PIN_LABELS);
+
+#if defined(ARDUINO_ARCH_RP2040)
+  // Must precede the library's SPI1.begin(), inside initR(). These are the
+  // core's defaults for SPI1, so this only pins them down.
+  TFT_BUS.setSCK(TFT_SCLK);
+  TFT_BUS.setTX(TFT_MOSI);
+#endif
 
   tft.initR(INITR_GREENTAB);        // required for the ST7735S variant
   tft.setRotation(1);               // landscape 160x128
