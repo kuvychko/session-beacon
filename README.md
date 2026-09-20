@@ -19,7 +19,7 @@ rolling five-hour limit and 52% of the seven-day one.
 | Part | Notes |
 |------|-------|
 | Arduino Nano ESP32, **headerless** | ABX00092, not the headered ABX00083. ESP32-S3, native USB CDC, 3.3 V logic. The reference build, complete and in daily use |
-| *or* Waveshare RP2040-Zero, **without headers** | The cheaper, smaller build, since Wi-Fi is never used. Enclosure printed and fitted, wiring decided, firmware in progress |
+| *or* Waveshare RP2040-Zero, **without headers** | The cheaper, smaller build, since Wi-Fi is never used. Runs the same firmware from the same source, on the same daemon |
 | 1.8" TFT, 128x160, ST7735S | SPI, 3.3 V, 8-pin header, [this JESSINIE listing](https://www.amazon.com/dp/B0D31BGJWF). Both panels bought from it were BGR-wired and need a one-line colour-order fix, without which red and blue render swapped. Verify yours; the check is free. |
 | USB-C cable | Data + power, nothing else needed |
 | Enclosure, 3 printed parts | 40 x 60 mm, 19 mm deep. The middle and back parts come in a version for each board. SolidWorks, STEP and 3MF in [`enclosure/`](enclosure) |
@@ -275,19 +275,18 @@ Code samples inside the documentation are MIT, not CC BY, so you can copy a pin
 definition or a shell command without attributing anything. Every dependency is
 BSD or MIT, so nothing here constrains what you do with it.
 
-**An RP2040 version is in progress.** The Nano ESP32 is overkill for this: its
-Wi-Fi and Bluetooth are most of what you pay for and the project uses neither, by
-design. A Waveshare RP2040-Zero is cheaper and smaller. Its enclosure is printed and
-fitted and its wiring is decided; the firmware is the remaining work, tracked on the
-[roadmap](docs/roadmap.md#next-rp2040-zero-edition). The daemon is the same for both
-boards. How the two builds differ is in
+**There are two builds.** The Nano ESP32 is overkill for this: its Wi-Fi and Bluetooth
+are most of what you pay for and the project uses neither, by design. A Waveshare
+RP2040-Zero is cheaper and smaller, and it now runs the same firmware, built from the
+same source, talking to the same daemon; the remaining work is living with it for a day
+([roadmap](docs/roadmap.md#next-rp2040-zero-edition)). How the two differ is in
 [docs/enclosure.md](docs/enclosure.md#two-builds). The case is published as STEP as
 well as mesh, so adapting it to another board does not depend on owning SolidWorks.
 
 ## Repository layout
 
 ```
-firmware/beacon/          Arduino sketch for the Nano ESP32 (Arduino IDE, Adafruit_ST7735)
+firmware/beacon/          Arduino sketch, one source for both boards (Adafruit_ST7735)
 firmware/tft_smoketest/   Standalone wiring/display test, flash this first
 host/                     Python daemon: hook receiver, state, serial link
   src/beacon_host/

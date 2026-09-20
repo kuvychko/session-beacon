@@ -1,8 +1,9 @@
 # Roadmap
 
 **Where this stands:** the beacon has been in daily use since early September. The Nano
-ESP32 build is complete: firmware 0.2.2, host daemon, hooks, enclosure and stand.
-The next big item is a second build on a **Waveshare RP2040-Zero**.
+ESP32 build is complete: firmware 0.3.0, host daemon, hooks, enclosure and stand. The
+**Waveshare RP2040-Zero** build now runs the same firmware from the same source, on the
+same daemon; what is left is living with it for a day and a photo.
 
 The document goes from what comes next to what is already done: the next build, the
 smaller open items, the things decided against, the recent hardening work, and then
@@ -23,48 +24,50 @@ still needs no level shifting. The port notes written before this was planned ar
 - The Nano ESP32 build stays supported. It is the reference, and every fix learned on it
   must carry over.
 
-**Work.** Each item comes from ESP32-specific code or hardware already in the tree:
+**Work.** Each item came from ESP32-specific code or hardware already in the tree:
 
-- [ ] **Wiring.** Pins decided and documented in [hardware.md](hardware.md#rp2040-zero):
-  all eight wires on one edge, with the display on SPI1 (`14` SCK, `15` MOSI) and CS,
-  DC and RST on `28`, `27` and `26`. Still open: confirm on the bench that 24 MHz SPI
-  holds and that the panel still needs the BGR `applyPanelColorOrder()` write. The
-  panel decides that, not the microcontroller, but check it.
-- [ ] **USB serial layer.** `beacon.ino` includes `tusb.h` and `esp_system.h`, and calls
-  `tud_cdc_n_connected()`, `Serial.setRxBufferSize()` and `esp_reset_reason()`. Those are
-  ESP32 core APIs. `txLine()`/`txPump()`/`txWatchdog()` exist because of how *that*
-  core's CDC `write()` blocks. Test the RP2040 core's CDC for the same wedge instead of
-  assuming the ESP32 findings carry over, in either direction.
-- [ ] **Display bus.** The display is on SPI1, so the constructor must be
-  `Adafruit_ST7735(&SPI1, TFT_CS, TFT_DC, TFT_RST)`. The three-argument form used on
-  the Nano drives SPI0. Decide the pin-name convention for the RP2040 core: the Nano's
-  `D10`-style names do not apply. `tft_smoketest` needs the same changes.
-- [ ] **Watchdog and reset survival.** `enableLoopWDT()` needs the RP2040 hardware
-  watchdog in its place. The values that must survive a reboot (`wedgeCures`,
-  `wedgeCause` and `wedgeFlips`, which feed the heartbeat's `wedge`, `wcause` and
-  `wflip`) are `RTC_NOINIT_ATTR` today, and `rst` comes from `esp_reset_reason()`. They
-  need an equivalent such as watchdog scratch registers or uninitialised RAM. Verify with
-  the `hang` command, as on the Nano.
-- [ ] **Host detection.** `serial_link.py` finds the board by the Nano ESP32's VID/PID
-  (`0x2341`/`0x0070`) only. Add the RP2040-Zero's IDs. Re-check the rule that the host
-  never toggles DTR/RTS: the bootloader-entry trigger differs per board. Document which
-  trigger applies to which board.
-- [ ] **Build and flash.** Pick an arduino-cli FQBN and an upload path (UF2/BOOTSEL), and
-  add both to the commands in `CLAUDE.md` next to the Nano's.
+- [x] **Wiring.** All eight wires on one edge, the display on SPI1 (`14` SCK, `15` MOSI)
+  with CS, DC and RST on `28`, `27` and `26`. Documented in
+  [hardware.md](hardware.md#rp2040-zero) and checked on the bench with the smoke test:
+  geometry, text and the layout mock all correct at 24 MHz, and the panel needs the same
+  BGR `applyPanelColorOrder()` write as the Nano's.
+- [x] **USB serial layer.** Re-checked rather than assumed, and the RP2040 core differs
+  in three ways that are now in [hardware.md](hardware.md#usb-serial-notes): its
+  `write()` gives up after a second instead of blocking forever, `Serial` as a boolean
+  is `tud_cdc_connected()` (the predicate the Nano build spells out by hand), and there
+  is no `setRxBufferSize()`. Both builds keep the tx queue.
+- [x] **Display bus.** `Adafruit_ST7735(&SPI1, ...)`, with `SPI1.setSCK()`/`setTX()`
+  before the library's `begin()`. Pins are named by their silkscreen numbers, since the
+  Nano's `D10`-style names do not exist here. `tft_smoketest` builds for both boards too.
+- [x] **Watchdog and reset survival.** `rp2040.wdt_begin(5000)` with the sketch feeding
+  it at the end of `loop()`, verified with `hang`: reboot in 5.0 s, reported as `wdt`.
+  The counters live in the watchdog's scratch registers 0 to 3, which survive the reboot
+  that writes them. `rp2040.reboot()` is itself a watchdog reboot, so a cure marks
+  itself and reports `sw`; without that mark every cure read `wdt`.
+- [x] **Host detection.** `find_port()` matches either board, and the heartbeat's new
+  `board` field names the build that answered. The RP2040's bootloader trigger is a
+  1200-baud open, not a DTR/RTS pattern; the daemon never changes the baud rate, and the
+  rule that the host never tries to revive a board through the port is unchanged.
+- [x] **Build and flash.** FQBN `rp2040:rp2040:waveshare_rp2040_zero`, uploaded as a
+  `.uf2`. Commands are in `CLAUDE.md`.
 - [x] **Enclosure.** `mid-rp2040-v0` and `back-rp2040-v0`, printed and test-fitted.
   They share `front-v0`, the stand, the M2 x 16 screws and the 40 x 60 x 19 mm envelope
   with the Nano build. See [enclosure.md](enclosure.md#two-builds).
-- [ ] **Docs.** Add a BOM, the README hardware table, and a photo of the finished unit.
+- [ ] **Docs.** A photo of the finished unit, and a BOM line for where the board was
+  bought. The hardware table, wiring, toolchain and USB notes are written.
+- [ ] **A full working day** on the RP2040 build, which is what "done" means below.
 
-**Open decision:** one sketch with a thin per-board layer, or a separate
-`firmware/beacon_rp2040/`. Leaning towards one sketch. Almost every hard-won rule in
-`CLAUDE.md` lives in the shared rendering and parsing code, and two copies would let the
-fixes drift apart.
+**Settled:** one sketch, not a second `firmware/beacon_rp2040/`. Almost every hard-won
+rule in `CLAUDE.md` lives in the shared rendering and parsing code, and two copies would
+let the fixes drift apart. Only four things are behind
+`#if defined(ARDUINO_ARCH_RP2040)`: the pins and SPI bus, `hostAttached()`, the platform
+block (reset reason, reboot, loop watchdog) and where the wedge counters live.
 
 **Done when:** an RP2040-Zero in its own case runs a full working day next to the Nano,
-fed by the same daemon, with no difference in behaviour. The loop watchdog (`hang`) and
-both paths of the wedge watchdog (`scripts/wedge-bench.py` with `stall` and `wedge`) must
-also be verified on it.
+fed by the same daemon, with no difference in behaviour. The watchdogs are already
+verified on it: `hang` rebooted it in 5.0 s, and `scripts/wedge-bench.py` passed with
+both `stall` (`wcause=att`) and `wedge` (`wcause=det`), each rebooting 30.2 s in with the
+count surviving.
 
 ## Smaller open items
 

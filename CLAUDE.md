@@ -11,7 +11,9 @@ Read `docs/architecture.md` before changing anything. The protocol in `docs/prot
 ## Layout
 
 ```
-firmware/beacon/beacon.ino   Arduino sketch. Arduino IDE, board "Arduino Nano ESP32".
+firmware/beacon/beacon.ino   Arduino sketch, one source for both boards. Arduino IDE
+                             or arduino-cli; boards "Arduino Nano ESP32" and
+                             "Waveshare RP2040 Zero".
 host/                        Python 3.12+ package, managed with uv. Entry point: beacon-host.
   src/beacon_host/           main, hook_server, state, persist, serial_link, statusline, capture, config
   tests/                     pytest; fixtures are real hook payloads captured from Claude Code
@@ -32,6 +34,21 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   the silkscreen label (`3.3V`, `28`): the board prints bare GPIO numbers, and the
   header-position numbers in pinout diagrams collide with them. The display is on SPI1,
   so the constructor must name `&SPI1`.
+- One sketch serves both boards, behind `#if defined(ARDUINO_ARCH_RP2040)`. Only four
+  things differ: the pins and SPI bus, `hostAttached()`, the platform block
+  (`resetReason()`, `restartBoard()`, `watchdogBegin()`/`watchdogFeed()`), and where the
+  wedge counters live. Compile both before handing firmware over; `BOARD_NAME` is
+  already taken by the RP2040 core, hence `BEACON_BOARD`.
+- The RP2040 has no RTC memory, so the counters that must survive the cure live in the
+  watchdog's scratch registers 0 to 3. Do not use 4 to 7: the SDK leaves the bootrom a
+  magic number and an entry point there.
+- On the RP2040, `rp2040.reboot()` is a watchdog reboot and `getResetReason()` cannot
+  tell it from the loop watchdog firing, so `restartBoard()` marks its own reboots in
+  the high bit of the cause word and `resetReason()` reads and clears that mark once, at
+  boot. Without it every cure reported `rst` as `wdt`, which is how it was found.
+- The RP2040's watchdog must be fed by the sketch (`watchdogFeed()` at the end of
+  `loop()`); the ESP32 core feeds its own. Same 5 s budget, same rule: nothing in
+  `loop()` may block for seconds.
 - The display panel is BGR-wired, so `applyPanelColorOrder()` must run after every `setRotation()` call. Without it red and blue render swapped. Both panels bought from this listing have been BGR, including `env_monitoring`'s, which had the same bug unnoticed for months. Do not "clean up" that register write.
 - Firmware is dumb: it renders what the host sends. Do not add policy (sorting, thresholds, labels) to the firmware.
 - The firmware drives the TFT over hardware SPI at 24 MHz, chosen by the 3-argument
@@ -205,23 +222,32 @@ The helpers are in `scripts/common.ps1`.
 Hooks are read at session start. After `install-hooks.ps1` the user must
 restart their Claude Code sessions or nothing will arrive.
 
-Firmware builds headlessly with the arduino-cli bundled inside the Arduino IDE install. Compile before handing firmware over; it catches real problems, such as `LINE_MAX` colliding with a POSIX macro from limits.h.
+Firmware builds headlessly with the arduino-cli bundled inside the Arduino IDE install. Compile **both boards** before handing firmware over; it catches real problems, such as `LINE_MAX` colliding with a POSIX macro from limits.h, or `BOARD_NAME` already being defined by the RP2040 core.
 
 ```powershell
 $cli = "$env:LOCALAPPDATA/Programs/Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe"
 & $cli compile --fqbn arduino:esp32:nano_nora firmware/beacon
-./scripts/restart-daemon.ps1 -StopOnly   # the daemon holds COM4
+& $cli compile --fqbn rp2040:rp2040:waveshare_rp2040_zero firmware/beacon
+./scripts/restart-daemon.ps1 -StopOnly   # the daemon holds the port
 & $cli upload  --fqbn arduino:esp32:nano_nora -p COM4 firmware/beacon
+& $cli upload  --fqbn rp2040:rp2040:waveshare_rp2040_zero -p COM6 firmware/beacon
 ./scripts/restart-daemon.ps1             # never Start-Process
-& $cli board list        # find the port if COM4 has moved
+& $cli board list        # find the port if it has moved
 ```
+
+The RP2040 upload reboots the board into its bootloader and copies a `.uf2`. If
+it reports a missing `.uf2`, or the board is already in BOOTSEL, compile with
+`--output-dir DIR` and copy `DIR/beacon.ino.uf2` onto the `RPI-RP2` drive; that
+is all the upload does.
 
 To check the TX watchdog on a flashed board, between the same two
 `restart-daemon.ps1` calls run `uv run --project host python
 scripts/wedge-bench.py COM4 stall`, then the same with `wedge`. Each should
-pass after a reboot about 30 s in.
+pass after a reboot about 30 s in. `hang` over serial tests the loop watchdog
+the same way; it should reboot within about 5 s and report `rst` as a watchdog
+reset, which is how a cure (`sw`) and a hang stay distinguishable.
 
-Required libraries are installed: Adafruit GFX 1.12.4, Adafruit ST7735/ST7789 1.11.0, ArduinoJson 7.4.3.
+Required libraries are installed: Adafruit GFX 1.12.4, Adafruit ST7735/ST7789 1.11.0, ArduinoJson 7.4.3. Both board packages are installed: `arduino:esp32` and `rp2040:rp2040` (arduino-pico).
 
 ## Do not
 

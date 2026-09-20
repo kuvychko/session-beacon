@@ -8,7 +8,7 @@ they differ.
 | Build | Board | Status |
 |-------|-------|--------|
 | Nano ESP32 | Arduino Nano ESP32, headerless | Complete, in daily use. The reference build |
-| RP2040-Zero | Waveshare RP2040-Zero | Enclosure printed and fitted, wiring decided. Firmware in progress; see the [roadmap](roadmap.md#next-rp2040-zero-edition) |
+| RP2040-Zero | Waveshare RP2040-Zero | Runs the same firmware from the same source. Bench-verified; not yet lived with for a full day, see the [roadmap](roadmap.md#next-rp2040-zero-edition) |
 
 ## Parts
 
@@ -134,7 +134,7 @@ On the Nano no rewiring was needed. The variant header for that board defines `M
 and `SCK` as `D13`, exactly where the display was already wired, so the sketch had
 been bit-banging pins that can clock themselves.
 
-Measured on this panel, same scenes before and after:
+Measured on the Nano ESP32, same scenes before and after:
 
 | Case | Software SPI | Hardware SPI at 24 MHz |
 |------|--------------|------------------------|
@@ -146,6 +146,8 @@ Verified on hardware: the picture is clean at 24 MHz, with no speckling or
 tearing, colours correct, the attention row pulsing and the footer bar sliding
 smoothly. Timings and receive counters cannot show any of that, so this needed a
 human looking at the panel.
+
+The RP2040-Zero build drives the same panel at the same 24 MHz over SPI1, and its heartbeats report 0 to 1 ms for the small repaints that a snapshot with one changed field causes, against about 2 ms on the Nano. Its full-screen repaint has not been measured separately; there is no reason to expect it to differ much, since the panel and the clock are the same.
 
 The clock is set to 24 MHz rather than the library's 32 MHz default. An ST7735S on
 jumper wires is not guaranteed at 32 MHz, and the failure is cosmetic and confusing
@@ -190,7 +192,9 @@ Both builds use the same libraries, via Library Manager: `Adafruit GFX Library`,
 
 ### RP2040-Zero
 
-To be written with the firmware port: board package, board name, FQBN and upload path (UF2/BOOTSEL). See the [roadmap](roadmap.md#next-rp2040-zero-edition).
+- Board package: **[arduino-pico](https://github.com/earlephilhower/arduino-pico)** (`rp2040:rp2040`), board **Waveshare RP2040 Zero**, FQBN `rp2040:rp2040:waveshare_rp2040_zero`. Add `https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json` to the board manager URLs.
+- Upload over USB. `arduino-cli upload -p COMx` reboots the board into its bootloader with a 1200-baud open, then copies the `.uf2`. If the board is already in BOOTSEL, or the upload cannot find the port, copy `beacon.ino.uf2` onto the `RPI-RP2` drive by hand; that is all the upload does.
+- Hold BOOT while plugging the board in to force BOOTSEL. A board with no firmware on it comes up that way already.
 
 ## Bring-up procedure
 
@@ -244,7 +248,7 @@ The other two permutations cannot come from that flag. Red and green also occupy
 
 ## USB serial notes
 
-These are the Nano ESP32's. The daemon is the same program for both builds and speaks the same [protocol](protocol.md) to either; detecting which port the board is on is the only part of it that depends on the board.
+The daemon is the same program for both builds and speaks the same [protocol](protocol.md) to either. Detecting which port the board is on is the only part of it that depends on the board, and the heartbeat's `board` field says which build answered.
 
 ### Nano ESP32
 
@@ -255,7 +259,13 @@ These are the Nano ESP32's. The daemon is the same program for both builds and s
 
 ### RP2040-Zero
 
-To be written with the firmware port. The RP2040 core's USB CDC is a different implementation from the ESP32's, so none of the Nano's findings are assumed to carry over, in either direction: the blocking `write()` that the tx queue works around, the attach flag the TX watchdog distrusts, and which DTR/RTS pattern restarts the board into its bootloader. Its USB VID/PID will be read off a flashed board and added to the daemon's detection.
+- `Serial` is USB CDC through TinyUSB, as on the Nano, but a different implementation, so the Nano's findings were re-checked rather than assumed.
+- **`write()` gives up after one second** instead of blocking forever. That is the fault that froze the Nano eight times in eight days, and it cannot hang this board outright. A second is still most of a frame, so both builds queue their output and pump it; see `txLine()`/`txPump()`.
+- **`Serial` as a boolean is `tud_cdc_connected()`**, the same predicate the Nano build spells out by hand, and the same one this core's `write()` and `availableForWrite()` consult. The Nano's warning against `if (Serial)` is about the ESP32 core's separate flag and does not apply here.
+- **There is no `setRxBufferSize()`.** The CDC receive buffer is whatever the core compiled in. Nothing is lost when it fills: USB CDC applies back-pressure, so the host's write waits instead.
+- **Opening the port at 1200 baud reboots the board into its bootloader.** That is how `arduino-cli` flashes it. The daemon opens at 115200 and never changes the baud rate, so it cannot trip this; it is the RP2040's equivalent of the DTR/RTS pattern the Nano watches for, and the same rule follows: nothing on the host may try to revive a board by fiddling with the port.
+- The board enumerates as VID/PID `0x2E8A:0x0003`, the Raspberry Pi vendor and the generic RP2040 product id. Every RP2040 board shares it, so the daemon's auto-detect recognises "an RP2040", not specifically a Zero. Use `--port COMx` if another RP2040 device is plugged in.
+- Windows assigns a COM number per physical USB port here too.
 
 ## Enclosure
 

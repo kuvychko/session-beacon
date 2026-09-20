@@ -19,26 +19,51 @@
 //   ?      command list
 
 #include <SPI.h>
+#if defined(ARDUINO_ARCH_RP2040)
+#include <hardware/structs/watchdog.h>  // scratch registers; see the wedge counters
+#else
 #include <esp_system.h>
 #include "tusb.h"   // tud_cdc_n_connected(); Serial is TinyUSB CDC on this board
+#endif
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 #include <ArduinoJson.h>
 
-// ---- Display wiring (Arduino pin names, same as env_monitoring) ----
+// ---- Display wiring ----
+//
+// The two builds share this panel and differ only in which pins carry it and
+// which SPI peripheral drives them. See docs/hardware.md#wiring.
+#if defined(ARDUINO_ARCH_RP2040)
+// RP2040-Zero. These are the numbers printed on the board, which are GPIO
+// numbers; the position numbers in pinout diagrams are a different scheme that
+// collides with them. All eight wires are on the left edge, component side up
+// with USB-C at the top.
+#define BEACON_BOARD "rp2040-zero"
+#define TFT_CS    28
+#define TFT_RST   26
+#define TFT_DC    27
+#define TFT_MOSI  15   // SPI1 TX
+#define TFT_SCLK  14   // SPI1 SCK
+#define TFT_BUS   SPI1
+#else
+// Nano ESP32. Arduino pin names, never raw GPIO numbers, same as env_monitoring.
+#define BEACON_BOARD "nano-esp32"
 #define TFT_CS    D10
 #define TFT_RST   D9
 #define TFT_DC    D8
 #define TFT_MOSI  D11
 #define TFT_SCLK  D13
+#define TFT_BUS   SPI
+#endif
 
-// Hardware SPI. D11 and D13 are this board's MOSI and SCK, confirmed in the
-// variant's pins_arduino.h, so the display is already on the pins the SPI
-// peripheral drives and this is a constructor change with no rewiring.
+// Hardware SPI. On both boards the display is already wired to the pins its SPI
+// peripheral drives: D11/D13 are the Nano's MOSI and SCK, and 15/14 are SPI1's
+// on the RP2040-Zero, both confirmed in the variant's pins_arduino.h.
 //
-// The three-argument constructor selects the peripheral; the five-argument one
-// names MOSI and SCK explicitly and makes the library bit-bang them instead.
-// Set USE_HARDWARE_SPI to 0 to go back, which is the whole revert.
+// The three-argument constructor selects the default peripheral, which is SPI0
+// and therefore wrong on the RP2040-Zero, so that build names its bus. The
+// five-argument form names MOSI and SCK and makes the library bit-bang them
+// instead. Set USE_HARDWARE_SPI to 0 to go back, which is the whole revert.
 #define USE_HARDWARE_SPI 1
 
 // The library defaults to 32 MHz. That is optimistic for an ST7735S on jumper
@@ -47,7 +72,9 @@
 // times faster than bit-banging. Lower this first if the picture is dirty.
 static constexpr uint32_t SPI_HZ = 24000000;
 
-#if USE_HARDWARE_SPI
+#if USE_HARDWARE_SPI && defined(ARDUINO_ARCH_RP2040)
+Adafruit_ST7735 tft = Adafruit_ST7735(&TFT_BUS, TFT_CS, TFT_DC, TFT_RST);
+#elif USE_HARDWARE_SPI
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 #else
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
@@ -77,7 +104,7 @@ static void applyPanelColorOrder() {
 }
 
 // ---- Constants ----
-static constexpr const char* FW_VERSION = "0.2.2";
+static constexpr const char* FW_VERSION = "0.3.0";
 static constexpr uint8_t  PROTOCOL_V    = 1;
 static constexpr uint32_t BAUD          = 115200;
 static constexpr size_t   LINE_BUF      = 1024;
@@ -234,12 +261,16 @@ uint32_t rxDropped = 0;  // lines abandoned for exceeding the buffer
 // ---- Outbound serial ----
 //
 // Nothing in this sketch may call Serial.print*() or Serial.write() directly.
-// On this core Serial is TinyUSB's USBCDC, whose write() loops until every byte
-// is in a 64-byte FIFO and has no timeout: setTxTimeoutMs() bounds only the
+// On the ESP32 core Serial is TinyUSB's USBCDC, whose write() loops until every
+// byte is in a 64-byte FIFO and has no timeout: setTxTimeoutMs() bounds only the
 // lock, not the wait. If the PC stops collecting while DTR is still asserted,
 // as a suspended USB port does, the write spins forever and loop() with it. The
 // panel keeps its last frame, so the board looked alive but frozen for hours,
 // eight times in eight days, until someone power-cycled it.
+//
+// The RP2040 core's SerialUSB::write() gives up after a second instead, so it
+// cannot hang the sketch outright. A second is still most of a frame, and the
+// queue costs nothing, so both builds go through it.
 //
 // So lines are queued here and txPump() hands the USB stack only as many bytes
 // as it has room for. A stalled pipe fills the queue, and further lines are
@@ -266,7 +297,15 @@ uint32_t txDropped = 0;  // lines lost to a stalled pipe with a host attached
 // the sketch controls. txWatchdog() cures it instead, by rebooting.
 static bool forceDetached = false;  // `wedge` command; bench test only
 static bool forceStalled = false;   // `stall` command; bench test only
+#if defined(ARDUINO_ARCH_RP2040)
+// SerialUSB::operator bool() is tud_cdc_connected(), the same predicate the
+// ESP32 build spells out, and the same one its write() and availableForWrite()
+// consult. The warning below about `if (Serial)` is about the *ESP32* core's
+// separate flag; it does not apply here.
+static bool hostAttached() { return (bool)Serial && !forceDetached; }
+#else
 static bool hostAttached() { return tud_cdc_n_connected(0) && !forceDetached; }
+#endif
 
 // Set whenever a byte actually leaves, and consumed by txWatchdog(). This, not
 // hostAttached(), is what the watchdog trusts: see the note there.
@@ -302,8 +341,88 @@ static void txPump() {
   if (sent) txProgressed = true;
 }
 
-// Why this boot happened, for the heartbeat. A `task_wdt` or `panic` here is
-// the watchdog below having rescued a hung loop().
+// ---- Counters that outlive a reboot ----
+// These four words have to outlive the reboot that writes them, which rules out
+// ordinary variables: .bss and .data are re-initialised on every boot, software
+// resets included.
+//
+// ESP32: RTC_NOINIT_ATTR, not RTC_DATA_ATTR. The latter is re-initialised on a
+// software restart, which is precisely the event being counted, so the count
+// would always read 0.
+//
+// RP2040: there is no RTC memory, but the watchdog's scratch registers survive
+// a watchdog reboot, which is what rp2040.reboot() performs. Registers 4 to 7
+// are spoken for -- the SDK's watchdog_reboot() leaves the bootrom a magic
+// number and an entry point in them -- so this uses 0 to 3.
+//
+// On both, the price is that the words are undefined after a power-on reset
+// rather than zeroed, hence the cookie and setup()'s check.
+static constexpr uint32_t TX_WEDGE_MS = 30000;
+static constexpr uint32_t WEDGE_COOKIE = 0x57454448;  // bumped with the layout below
+enum : uint32_t { WEDGE_NONE = 0, WEDGE_DETACHED = 1, WEDGE_ATTACHED = 2 };
+enum : uint8_t { W_COOKIE = 0, W_CURES = 1, W_CAUSE = 2, W_FLIPS = 3 };
+
+#if defined(ARDUINO_ARCH_RP2040)
+static inline uint32_t wedgeGet(uint8_t i)             { return watchdog_hw->scratch[i]; }
+static inline void     wedgeSet(uint8_t i, uint32_t v) { watchdog_hw->scratch[i] = v; }
+#else
+RTC_NOINIT_ATTR uint32_t wedgeSlot[4];
+static inline uint32_t wedgeGet(uint8_t i)             { return wedgeSlot[i]; }
+static inline void     wedgeSet(uint8_t i, uint32_t v) { wedgeSlot[i] = v; }
+#endif
+
+// ---- Platform ----
+//
+// The three things the two cores spell differently: why the board last reset,
+// how to reboot it, and the loop watchdog. Everything else in this sketch is
+// Arduino or library API.
+
+// Why this boot happened, for the heartbeat. A watchdog reason here is the
+// watchdog below having rescued a hung loop(); `sw` is txWatchdog()'s cure.
+#if defined(ARDUINO_ARCH_RP2040)
+// The RP2040 has one reset path for both, so the sketch has to label its own.
+// rp2040.reboot() is watchdog_reboot(0, 0, 10), and with a zero entry point
+// that is indistinguishable from the loop watchdog timing out: both set the
+// watchdog's reason bit and leave the SDK's scratch[4] clear, so
+// getResetReason() answers WDT_RESET for each. Verified on the board, where
+// txWatchdog()'s cure reported `rst` as `wdt`.
+//
+// So a cure marks itself, in the high bit of the word that already carries its
+// cause. The mark is read and cleared once, at boot, before anything else can
+// reboot the board. A reset with no mark and the watchdog's reason bit really
+// was the loop watchdog -- or the UF2 bootloader, which also reboots this way,
+// so `wdt` is expected on the first boot after flashing.
+static constexpr uint32_t WEDGE_SW_MARK = 0x80000000u;
+
+static void markOwnRestart() { wedgeSet(W_CAUSE, wedgeGet(W_CAUSE) | WEDGE_SW_MARK); }
+
+static const char* resetReason() {
+  const bool ours = wedgeGet(W_CAUSE) & WEDGE_SW_MARK;
+  if (ours) wedgeSet(W_CAUSE, wedgeGet(W_CAUSE) & ~WEDGE_SW_MARK);
+  switch (rp2040.getResetReason()) {
+    case RP2040::PWRON_RESET:    return "power";
+    case RP2040::SOFT_RESET:     return "sw";
+    case RP2040::WDT_RESET:      return ours ? "sw" : "wdt";
+    case RP2040::RUN_PIN_RESET:  return "run_pin";
+    case RP2040::DEBUG_RESET:    return "debug";
+    case RP2040::GLITCH_RESET:   return "glitch";
+    case RP2040::BROWNOUT_RESET: return "brownout";
+    default:                     return "other";
+  }
+}
+
+static void restartBoard() {
+  markOwnRestart();
+  rp2040.reboot();
+}
+
+// The RP2040's hardware watchdog must be fed by the sketch; the ESP32 core
+// feeds its own from the loop task once enableLoopWDT() arms it. Same 5 s
+// budget on both, and the same rule follows: nothing in loop() may block for
+// seconds. The RP2040's counter tops out around 8.3 s.
+static void watchdogBegin() { rp2040.wdt_begin(5000); }
+static void watchdogFeed()  { rp2040.wdt_reset(); }
+#else
 static const char* resetReason() {
   switch (esp_reset_reason()) {
     case ESP_RST_POWERON:  return "power";
@@ -316,6 +435,17 @@ static const char* resetReason() {
     default:               return "other";
   }
 }
+
+// esp_reset_reason() already separates ESP.restart() from a watchdog timeout,
+// so this build needs no mark of its own.
+static void restartBoard() { ESP.restart(); }
+
+// Without this any hang in loop() is permanent and invisible, because the
+// ST7735 keeps its last frame. The core feeds it before every loop(), so the
+// sketch needs no equivalent of watchdogFeed().
+static void watchdogBegin() { enableLoopWDT(); }
+static void watchdogFeed()  {}
+#endif
 
 // ---- Helpers ----
 static uint16_t stateColor(const char* st) {
@@ -389,17 +519,6 @@ static inline bool elapsed(uint32_t now, uint32_t since, uint32_t ms) {
 // that stopped draining, and a high `wflip` a link flapping under USB
 // selective suspend.
 //
-// RTC_NOINIT_ATTR, not RTC_DATA_ATTR: the latter is re-initialised on a
-// software restart, which is precisely the event being counted, so the count
-// would always read 0. The price is that these are undefined after a power-on
-// reset rather than zeroed, hence the cookie and setup()'s check.
-static constexpr uint32_t TX_WEDGE_MS = 30000;
-static constexpr uint32_t WEDGE_COOKIE = 0x57454448;  // bumped with the layout below
-enum : uint32_t { WEDGE_NONE = 0, WEDGE_DETACHED = 1, WEDGE_ATTACHED = 2 };
-RTC_NOINIT_ATTR uint32_t wedgeCookie;
-RTC_NOINIT_ATTR uint32_t wedgeCures;
-RTC_NOINIT_ATTR uint32_t wedgeCause;  // the last cure's WEDGE_*
-RTC_NOINIT_ATTR uint32_t wedgeFlips;  // attachFlips during the last cure's episode
 uint32_t attachFlips = 0;    // hostAttached() transitions, 1 after a normal connect
 bool attachWas = false;
 uint32_t wedgeSinceMs = 0;   // when the contradiction started; 0 = not in one
@@ -407,16 +526,20 @@ uint32_t wedgeFlipsAtStart = 0;
 
 // Call once, before the first heartbeat can report the count.
 static void wedgeCountBegin() {
-  if (wedgeCookie != WEDGE_COOKIE) {  // cold boot: RTC memory holds garbage
-    wedgeCookie = WEDGE_COOKIE;
-    wedgeCures = 0;
-    wedgeCause = WEDGE_NONE;
-    wedgeFlips = 0;
+  if (wedgeGet(W_COOKIE) != WEDGE_COOKIE) {  // cold boot: the words hold garbage
+    wedgeSet(W_COOKIE, WEDGE_COOKIE);
+    wedgeSet(W_CURES, 0);
+    wedgeSet(W_CAUSE, WEDGE_NONE);
+    wedgeSet(W_FLIPS, 0);
   }
 }
 
+// Read once in setup(), because on the RP2040 resetReason() consumes the mark
+// that a cure leaves behind, and because the answer cannot change while running.
+const char* bootReason = "other";
+
 static const char* wedgeCauseName() {
-  switch (wedgeCause) {
+  switch (wedgeGet(W_CAUSE)) {
     case WEDGE_DETACHED: return "det";
     case WEDGE_ATTACHED: return "att";
     default:             return "none";
@@ -445,10 +568,10 @@ static void txWatchdog(uint32_t now) {
     wedgeFlipsAtStart = attachFlips;
   }
   if (!elapsed(now, wedgeSinceMs, TX_WEDGE_MS)) return;
-  wedgeCures++;
-  wedgeCause = attached ? WEDGE_ATTACHED : WEDGE_DETACHED;
-  wedgeFlips = attachFlips - wedgeFlipsAtStart;
-  ESP.restart();
+  wedgeSet(W_CURES, wedgeGet(W_CURES) + 1);
+  wedgeSet(W_CAUSE, attached ? WEDGE_ATTACHED : WEDGE_DETACHED);
+  wedgeSet(W_FLIPS, attachFlips - wedgeFlipsAtStart);
+  restartBoard();
 }
 
 // Right-aligned inside a fixed-width field, so "9s" and "10s" occupy the same
@@ -931,8 +1054,17 @@ static void handleCommand(const char* cmd) {
 // ---- Arduino ----
 void setup() {
   wedgeCountBegin();
+  bootReason = resetReason();  // must follow wedgeCountBegin(); see bootReason
+#if !defined(ARDUINO_ARCH_RP2040)
   Serial.setRxBufferSize(4096);  // must precede begin(); default is far smaller
+#endif
   Serial.begin(BAUD);
+#if USE_HARDWARE_SPI && defined(ARDUINO_ARCH_RP2040)
+  // Must precede the library's SPI1.begin(), inside initR(). These are the
+  // core's defaults for SPI1, so this only pins them down.
+  TFT_BUS.setSCK(TFT_SCLK);
+  TFT_BUS.setTX(TFT_MOSI);
+#endif
   tft.initR(INITR_GREENTAB);
 #if USE_HARDWARE_SPI
   tft.setSPISpeed(SPI_HZ);
@@ -944,10 +1076,10 @@ void setup() {
 
   // Without this a hung loop() is permanent: the ST7735 keeps its last frame
   // with no help from the MCU, so a dead sketch looks like a calm desk. With it
-  // the core feeds the task watchdog before every loop(), and a hang becomes a
-  // reboot after 5 s that the host treats as an ordinary reconnect. Nothing in
-  // loop() may therefore block for seconds; a render costs about 65 ms.
-  enableLoopWDT();
+  // a hang becomes a reboot after 5 s that the host treats as an ordinary
+  // reconnect. Nothing in loop() may therefore block for seconds; a render
+  // costs about 65 ms.
+  watchdogBegin();
 }
 
 void loop() {
@@ -1014,24 +1146,25 @@ void loop() {
     lastHbMs = now;
     int32_t since = (int32_t)(now - lastMsgMs);
     if (since < 0) since = 0;
-    char hb[256];
+    char hb[320];
     snprintf(hb, sizeof hb,
-             "{\"t\":\"hb\",\"fw\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"aflip\":%lu,\"wedge\":%lu,\"wcause\":\"%s\",\"wflip\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
-             FW_VERSION, (unsigned long)(now / 1000),
+             "{\"t\":\"hb\",\"fw\":\"%s\",\"board\":\"%s\",\"up\":%lu,\"rx\":%lu,\"bad\":%lu,\"drop\":%lu,\"txdrop\":%lu,\"aflip\":%lu,\"wedge\":%lu,\"wcause\":\"%s\",\"wflip\":%lu,\"since\":%ld,\"render\":%lu,\"spi\":\"%s\",\"rst\":\"%s\"}",
+             FW_VERSION, BEACON_BOARD, (unsigned long)(now / 1000),
              (unsigned long)rxLines, (unsigned long)rxBad,
              (unsigned long)rxDropped, (unsigned long)txDropped,
-             (unsigned long)attachFlips, (unsigned long)wedgeCures,
-             wedgeCauseName(), (unsigned long)wedgeFlips, (long)since,
+             (unsigned long)attachFlips, (unsigned long)wedgeGet(W_CURES),
+             wedgeCauseName(), (unsigned long)wedgeGet(W_FLIPS), (long)since,
              (unsigned long)lastRenderMs,
 #if USE_HARDWARE_SPI
              "hw",
 #else
              "sw",
 #endif
-             resetReason());
+             bootReason);
     txLine(hb);
   }
 
   txWatchdog(now);
   txPump();
+  watchdogFeed();  // nothing above may block for seconds; see watchdogBegin()
 }
