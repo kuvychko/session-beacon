@@ -45,6 +45,13 @@ the rating that stops it shrinking back from the iron on leads this short.
 
 Soldering the bent header. Eight joints on 2.54 mm pitch, done under a magnifier lamp.
 
+![The RP2040-Zero build, wired and seated in its case](photos/beacon_rp2040_2.jpg)
+
+The second build, on a Waveshare RP2040-Zero. Same display, same eight wires, same
+firmware from the same source; a different mid and back part hold the smaller board.
+Its parts laid out before assembly, and what differs between the two builds, are in
+[docs/enclosure.md](docs/enclosure.md#two-builds).
+
 ![The beacon in its stand, from the side](photos/sessions_beacon3.jpg)
 
 The stand seen from off-axis. Flat on the desk the screen points at the ceiling; 25

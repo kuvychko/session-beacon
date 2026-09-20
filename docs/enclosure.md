@@ -178,6 +178,20 @@ deliberate choice rather than an unfinished one. A Waveshare RP2040-Zero is far 
 and cheaper, has USB-C, and is 3.3 V logic, so the display still needs no level
 shifting.
 
+![The RP2040-Zero build's parts](../photos/beacon_rp2040_1.jpg)
+
+Everything in the RP2040 build, before assembly: `back-rp2040-v0` with the ridges that
+retain the board, the bare RP2040-Zero, `mid-rp2040-v0`, the display module with its
+header still straight, and `front-v0`, which is the one printed part both builds share.
+The board's own labels are legible here, and they are what the wiring table names: `5V`,
+`GND`, `3.3V`, then bare GPIO numbers down the left edge.
+
+![The RP2040-Zero wired into its case](../photos/beacon_rp2040_2.jpg)
+
+The same board wired and seated. Eight silicone conductors run from the display's header,
+bent flat as on the Nano, to one edge of the board, and the ridges close onto the bare
+PCB to hold it. The USB-C cutout is the only opening in the finished case.
+
 What differs between them:
 
 - **Mid and back parts.** The ridges that retain the board are shaped to its outline,
@@ -189,8 +203,8 @@ What differs between them:
   host daemon is the same for both.
 
 Status: the RP2040-Zero build is assembled and running the same firmware as the Nano,
-from the same source. What is left is a day of living with it and a photo of the
-finished unit, tracked on the [roadmap](roadmap.md#next-rp2040-zero-edition).
+from the same source. What is left is a day of living with it, tracked on the
+[roadmap](roadmap.md#next-rp2040-zero-edition).
 
 ## Versioning
 

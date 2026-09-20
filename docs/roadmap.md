@@ -53,8 +53,9 @@ still needs no level shifting. The port notes written before this was planned ar
 - [x] **Enclosure.** `mid-rp2040-v0` and `back-rp2040-v0`, printed and test-fitted.
   They share `front-v0`, the stand, the M2 x 16 screws and the 40 x 60 x 19 mm envelope
   with the Nano build. See [enclosure.md](enclosure.md#two-builds).
-- [ ] **Docs.** A photo of the finished unit, and a BOM line for where the board was
-  bought. The hardware table, wiring, toolchain and USB notes are written.
+- [ ] **Docs.** A photo of the finished unit in its stand, next to the Nano's, and a BOM
+  line for where the board was bought. The hardware table, wiring, toolchain, USB notes
+  and the build-stage photos in [enclosure.md](enclosure.md#two-builds) are written.
 - [ ] **A full working day** on the RP2040 build, which is what "done" means below.
 
 **Settled:** one sketch, not a second `firmware/beacon_rp2040/`. Almost every hard-won
