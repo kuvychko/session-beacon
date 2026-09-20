@@ -284,9 +284,9 @@ BSD or MIT, so nothing here constrains what you do with it.
 
 **There are two builds.** The Nano ESP32 is overkill for this: its Wi-Fi and Bluetooth
 are most of what you pay for and the project uses neither, by design. A Waveshare
-RP2040-Zero is cheaper and smaller, and it now runs the same firmware, built from the
-same source, talking to the same daemon; the remaining work is living with it for a day
-([roadmap](docs/roadmap.md#next-rp2040-zero-edition)). How the two differ is in
+RP2040-Zero is cheaper and smaller, and runs the same firmware, built from the same
+source, talking to the same daemon
+([what the port involved](docs/roadmap.md#the-rp2040-zero-edition)). How the two differ is in
 [docs/enclosure.md](docs/enclosure.md#two-builds). The case is published as STEP as
 well as mesh, so adapting it to another board does not depend on owning SolidWorks.
 

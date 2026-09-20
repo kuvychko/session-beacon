@@ -202,9 +202,9 @@ What differs between them:
 - **Firmware.** Pins, the SPI bus and some USB serial details are board-specific. The
   host daemon is the same for both.
 
-Status: the RP2040-Zero build is assembled and running the same firmware as the Nano,
-from the same source. What is left is a day of living with it, tracked on the
-[roadmap](roadmap.md#next-rp2040-zero-edition).
+Both builds are complete and interchangeable: same display, same daemon, same firmware
+from the same source, and the same 40 x 60 x 19 mm case from the outside. What the port
+involved is in the [roadmap](roadmap.md#the-rp2040-zero-edition).
 
 ## Versioning
 

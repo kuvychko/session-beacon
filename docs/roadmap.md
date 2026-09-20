@@ -1,74 +1,13 @@
 # Roadmap
 
-**Where this stands:** the beacon has been in daily use since early September. The Nano
-ESP32 build is complete: firmware 0.3.0, host daemon, hooks, enclosure and stand. The
-**Waveshare RP2040-Zero** build now runs the same firmware from the same source, on the
-same daemon; what is left is living with it for a day and a photo.
+**Where this stands:** the beacon has been in daily use since early September, and
+there are now two complete builds. Both run firmware 0.3.0 from one source, on the same
+daemon, hooks, enclosure family and stand: the original **Arduino Nano ESP32** and a
+**Waveshare RP2040-Zero**, which is smaller and cheaper and gives up nothing the project
+uses.
 
-The document goes from what comes next to what is already done: the next build, the
-smaller open items, the things decided against, the recent hardening work, and then
-the history.
-
-## Next: RP2040-Zero edition
-
-**Why.** Most of what the Nano ESP32 costs is its Wi-Fi and Bluetooth, and this project
-uses neither on purpose ([non-goals](architecture.md#non-goals-for-now)). The
-RP2040-Zero is far smaller and cheaper, has USB-C, and uses 3.3 V logic, so the display
-still needs no level shifting. The port notes written before this was planned are in
-[enclosure.md](enclosure.md#two-builds).
-
-**Ground rules.**
-
-- The protocol does not change. The host should not care which board is on the other end.
-- The firmware stays dumb. The port moves code between boards and adds no behaviour.
-- The Nano ESP32 build stays supported. It is the reference, and every fix learned on it
-  must carry over.
-
-**Work.** Each item came from ESP32-specific code or hardware already in the tree:
-
-- [x] **Wiring.** All eight wires on one edge, the display on SPI1 (`14` SCK, `15` MOSI)
-  with CS, DC and RST on `28`, `27` and `26`. Documented in
-  [hardware.md](hardware.md#rp2040-zero) and checked on the bench with the smoke test:
-  geometry, text and the layout mock all correct at 24 MHz, and the panel needs the same
-  BGR `applyPanelColorOrder()` write as the Nano's.
-- [x] **USB serial layer.** Re-checked rather than assumed, and the RP2040 core differs
-  in three ways that are now in [hardware.md](hardware.md#usb-serial-notes): its
-  `write()` gives up after a second instead of blocking forever, `Serial` as a boolean
-  is `tud_cdc_connected()` (the predicate the Nano build spells out by hand), and there
-  is no `setRxBufferSize()`. Both builds keep the tx queue.
-- [x] **Display bus.** `Adafruit_ST7735(&SPI1, ...)`, with `SPI1.setSCK()`/`setTX()`
-  before the library's `begin()`. Pins are named by their silkscreen numbers, since the
-  Nano's `D10`-style names do not exist here. `tft_smoketest` builds for both boards too.
-- [x] **Watchdog and reset survival.** `rp2040.wdt_begin(5000)` with the sketch feeding
-  it at the end of `loop()`, verified with `hang`: reboot in 5.0 s, reported as `wdt`.
-  The counters live in the watchdog's scratch registers 0 to 3, which survive the reboot
-  that writes them. `rp2040.reboot()` is itself a watchdog reboot, so a cure marks
-  itself and reports `sw`; without that mark every cure read `wdt`.
-- [x] **Host detection.** `find_port()` matches either board, and the heartbeat's new
-  `board` field names the build that answered. The RP2040's bootloader trigger is a
-  1200-baud open, not a DTR/RTS pattern; the daemon never changes the baud rate, and the
-  rule that the host never tries to revive a board through the port is unchanged.
-- [x] **Build and flash.** FQBN `rp2040:rp2040:waveshare_rp2040_zero`, uploaded as a
-  `.uf2`. Commands are in `CLAUDE.md`.
-- [x] **Enclosure.** `mid-rp2040-v0` and `back-rp2040-v0`, printed and test-fitted.
-  They share `front-v0`, the stand, the M2 x 16 screws and the 40 x 60 x 19 mm envelope
-  with the Nano build. See [enclosure.md](enclosure.md#two-builds).
-- [ ] **Docs.** A photo of the finished unit in its stand, next to the Nano's, and a BOM
-  line for where the board was bought. The hardware table, wiring, toolchain, USB notes
-  and the build-stage photos in [enclosure.md](enclosure.md#two-builds) are written.
-- [ ] **A full working day** on the RP2040 build, which is what "done" means below.
-
-**Settled:** one sketch, not a second `firmware/beacon_rp2040/`. Almost every hard-won
-rule in `CLAUDE.md` lives in the shared rendering and parsing code, and two copies would
-let the fixes drift apart. Only four things are behind
-`#if defined(ARDUINO_ARCH_RP2040)`: the pins and SPI bus, `hostAttached()`, the platform
-block (reset reason, reboot, loop watchdog) and where the wedge counters live.
-
-**Done when:** an RP2040-Zero in its own case runs a full working day next to the Nano,
-fed by the same daemon, with no difference in behaviour. The watchdogs are already
-verified on it: `hang` rebooted it in 5.0 s, and `scripts/wedge-bench.py` passed with
-both `stall` (`wcause=att`) and `wedge` (`wcause=det`), each rebooting 30.2 s in with the
-count surviving.
+The document goes from what is open to what is already done: the smaller open items, the
+things decided against, the recent hardening work, and then the history.
 
 ## Smaller open items
 
@@ -159,16 +98,61 @@ Exit criteria, which still define correct behaviour:
 **Phase 3** is the list in "Recent hardening" above. None of it was planned; all of it
 came from living with the device.
 
+## The RP2040-Zero edition
+
+**Why.** Most of what the Nano ESP32 costs is its Wi-Fi and Bluetooth, and this project
+uses neither on purpose ([non-goals](architecture.md#non-goals-for-now)). The
+RP2040-Zero is far smaller and cheaper, has USB-C, and is 3.3 V logic, so the display
+still needs no level shifting. The ground rules were that the protocol does not change,
+the firmware stays dumb, and the Nano build stays supported as the reference.
+
+**One sketch, not two.** Almost every hard-won rule in `CLAUDE.md` lives in the shared
+rendering and parsing code, and two copies would let the fixes drift apart. Only four
+things sit behind `#if defined(ARDUINO_ARCH_RP2040)`: the pins and SPI bus,
+`hostAttached()`, the platform block (reset reason, reboot, loop watchdog) and where the
+wedge counters live.
+
+**What the port turned up**, none of it assumed from the ESP32 findings:
+
+- The RP2040 core's `write()` gives up after a second rather than blocking forever, so
+  the fault that froze the Nano eight times in eight days cannot happen here. Both
+  builds keep the tx queue anyway: a second is still most of a frame.
+- `Serial` as a boolean is `tud_cdc_connected()`, the same predicate the Nano build
+  spells out by hand, so `hostAttached()` can use it. The warning against `if (Serial)`
+  is about the ESP32 core's separate flag and does not carry over.
+- There is no RTC memory, so the counters that outlive a cure live in the watchdog's
+  scratch registers 0 to 3. Registers 4 to 7 hold what the SDK leaves the bootrom.
+- `rp2040.reboot()` is itself a watchdog reboot and `getResetReason()` cannot tell it
+  from the loop watchdog firing, so a cure marks itself and `resetReason()` reads and
+  clears that mark at boot. Found on the board, where every cure reported `rst` as
+  `wdt`.
+- The bootloader trigger is a 1200-baud open, not a DTR/RTS pattern. The daemon never
+  changes the baud rate, so the rule that the host never revives a board through the
+  port is unchanged.
+
+**Verified on the assembled unit**: the smoke test's geometry, text and layout mock at
+24 MHz, with the same BGR fix the Nano's panel needs; `hang` rebooting it in 5.0 s; and
+`scripts/wedge-bench.py` passing both `stall` (`wcause=att`) and `wedge` (`wcause=det`),
+each rebooting 30.2 s in with the count surviving. The same three tests pass unchanged
+on the Nano, which is the evidence that one sketch for two boards cost the reference
+build nothing. The daemon finds either board by USB id, and the heartbeat's `board`
+field names the one that answered.
+
+The enclosure is `mid-rp2040-v0` and `back-rp2040-v0`, sharing `front-v0`, the stand,
+the M2 x 16 screws and the 40 x 60 x 19 mm envelope with the Nano build. The two cases
+are identical from the outside, which is why there is no separate photo of the finished
+unit; the build-stage photos are in [enclosure.md](enclosure.md#two-builds).
+
 ## Open questions
 
-- **RP2040: one sketch or two?** See [the open decision](#next-rp2040-zero-edition)
-  above.
 - **The null context case is untested on real data.** `used_percentage` is null early in
   a session and after `/compact`. The token-count fallback that covers it has only been
   exercised by unit tests. See
   [claude-code-integration.md](claude-code-integration.md#still-to-confirm).
 
 Settled since the last revision:
+- **RP2040: one sketch or two?** One, with a thin per-board layer. See
+  [the RP2040-Zero edition](#the-rp2040-zero-edition).
 - The statusline carries the context percentage directly.
 - Hooks run fine through the `curl` command lines on Windows.
 - `idle_nag_s` was never needed. Claude Code's own `idle_prompt` arrives a few minutes

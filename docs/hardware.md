@@ -8,7 +8,7 @@ they differ.
 | Build | Board | Status |
 |-------|-------|--------|
 | Nano ESP32 | Arduino Nano ESP32, headerless | Complete, in daily use. The reference build |
-| RP2040-Zero | Waveshare RP2040-Zero | Runs the same firmware from the same source. Bench-verified; not yet lived with for a full day, see the [roadmap](roadmap.md#next-rp2040-zero-edition) |
+| RP2040-Zero | Waveshare RP2040-Zero | Complete. Runs the same firmware from the same source, on the same daemon. See [the port's notes](roadmap.md#the-rp2040-zero-edition) |
 
 ## Parts
 
