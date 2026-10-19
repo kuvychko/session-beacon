@@ -780,60 +780,119 @@ def test_a_parked_session_that_keeps_being_notified_is_not_a_ghost():
     assert st.snapshot(100000)["s"][0]["age"] == 100000
 
 
-def test_an_idle_session_that_never_notifies_goes_stale():
-    """A window closed mid-idle without a SessionEnd sat green, its age
-    climbing, until the day-long ghost cutoff. A live one would have sent an
-    idle_prompt long before idle_stale_s."""
-    st = SessionStore(idle_stale_s=600)
-    st.apply_event(ev("Stop"), 0)
-    st.tick(600)
-    assert st.sessions["abc12345-0000"].state == State.IDLE
-    st.tick(601)
+# ---- a finished turn goes red without its idle_prompt ----------------------
+#
+# Claude Code 2.1.303 sent no idle_prompt after any of three turns left idle
+# for up to seven minutes, and that notification was the only way an IDLE row
+# went red. Every Stop on that build is also followed by a SubagentStop from a
+# hidden post-turn fork, with an agent_id, an empty agent_type and no tool
+# events of its own.
+
+HIDDEN_FORK = {"agent_id": "a14e577e0000", "agent_type": "", "background_tasks": []}
+
+
+def test_a_finished_turn_goes_red_without_an_idle_prompt():
+    st = SessionStore(idle_prompt_s=60, need_pulse_s=120, need_red_s=600)
+    st.apply_event(ev("UserPromptSubmit"), 0)
+    st.apply_event(ev("Stop", background_tasks=[]), 10)
     s = st.sessions["abc12345-0000"]
-    assert s.state == State.STALE
-    assert st.snapshot(700)["s"][0]["age"] == 99
+    st.tick(70)
+    assert s.state == State.IDLE
+    st.tick(71)
+    assert s.state == State.NEEDS_INPUT
+    assert st.snapshot(71)["s"][0]["age"] == 0
+    st.tick(71 + 121)
+    assert s.state == State.NEEDS_HELD
+    st.tick(71 + 601)
+    assert s.state == State.WAITING
+
+
+def test_the_hidden_forks_subagent_stop_neither_counts_nor_postpones():
+    """The 2.1.303 timeline: Stop, then the fork's SubagentStop 3 s or three
+    minutes later. Neither may hold the row green."""
+    for fork_at in (13, 195):
+        st = SessionStore(idle_prompt_s=60)
+        st.apply_event(ev("Stop", background_tasks=[]), 10)
+        if fork_at < 71:
+            st.apply_event(ev("SubagentStop", **HIDDEN_FORK), fork_at)
+        st.tick(71)
+        s = st.sessions["abc12345-0000"]
+        assert s.state == State.NEEDS_INPUT, fork_at
+        if fork_at >= 71:
+            st.apply_event(ev("SubagentStop", **HIDDEN_FORK), fork_at)
+            st.tick(fork_at)
+            assert s.state == State.NEEDS_HELD, fork_at
+            assert st.snapshot(fork_at)["s"][0]["age"] == fork_at - 71
+        assert s.bg_tasks == 0 and not s.turn_over
+
+
+def test_an_informational_event_does_not_postpone_it():
+    """Measured from when the turn ended, not from the last event."""
+    st = SessionStore(idle_prompt_s=60)
+    st.apply_event(ev("Stop"), 0)
+    st.apply_event(ev("Notification", notification_type="auth_success"), 50)
+    st.tick(61)
+    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
+
+
+def test_a_real_idle_prompt_afterwards_does_not_restart_the_ladder():
+    """On a build that still sends one, it lands on a row already red."""
+    st = SessionStore(idle_prompt_s=60, need_pulse_s=120)
+    st.apply_event(ev("Stop"), 0)
+    st.tick(61)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 183)
+    st.tick(182)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.NEEDS_HELD
+    assert st.snapshot(183)["s"][0]["age"] == 122
+
+
+def test_a_real_idle_prompt_first_takes_the_row_as_before():
+    st = SessionStore(idle_prompt_s=60)
+    st.apply_event(ev("Stop"), 0)
+    st.apply_event(ev("Notification", notification_type="idle_prompt"), 30)
+    st.tick(61)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.NEEDS_INPUT
+    assert st.snapshot(61)["s"][0]["age"] == 31
+
+
+def test_untracked_work_softens_it_to_look_and_then_graduates():
+    st = SessionStore(idle_prompt_s=60, look_s=300)
+    st.apply_event(ev("Stop", background_tasks=WORKFLOW), 0)
+    s = st.sessions["abc12345-0000"]
+    st.tick(61)
+    assert s.state == State.NEEDS_LOOK
+    st.tick(361)
+    assert s.state == State.NEEDS_LOOK
+    st.tick(362)
+    assert s.state == State.NEEDS_INPUT
+
+
+def test_the_idle_wait_starts_when_the_last_subagent_stops():
+    """A turn that ended on a subagent waits on the machine until it stops."""
+    st = SessionStore(idle_prompt_s=60)
+    st.apply_event(ev("Stop", background_tasks=[
+        {"id": "a1", "type": "subagent", "status": "running"}]), 0)
+    st.apply_event(ev("PostToolUse", tool_name="Bash", agent_id="a1"), 60)
+    st.tick(100)
+    s = st.sessions["abc12345-0000"]
+    assert s.state == State.WORKING
+    st.apply_event(ev("SubagentStop", agent_id="a1", background_tasks=[]), 120)
+    assert s.state == State.IDLE
+    st.tick(180)
+    assert s.state == State.IDLE
+    st.tick(181)
+    assert s.state == State.NEEDS_INPUT
 
 
 def test_a_session_opened_and_closed_before_its_first_prompt_goes_stale():
     st = SessionStore(idle_stale_s=600)
     st.apply_event(ev("SessionStart"), 0)
+    st.tick(600)
+    assert st.sessions["abc12345-0000"].state == State.STARTING
     st.tick(601)
     assert st.sessions["abc12345-0000"].state == State.STALE
-
-
-def test_any_event_keeps_an_idle_session_green():
-    """Measured from the last event, so an informational notification is proof
-    of life too."""
-    st = SessionStore(idle_stale_s=600)
-    st.apply_event(ev("Stop"), 0)
-    st.apply_event(ev("Notification", notification_type="auth_success"), 500)
-    st.tick(1000)
-    assert st.sessions["abc12345-0000"].state == State.IDLE
-
-
-def test_a_live_idle_session_is_taken_off_idle_by_its_idle_prompt():
-    """The premise of idle_stale_s: the notification lands first and the row
-    walks the ladder as before, never touching STALE."""
-    st = SessionStore(idle_stale_s=600)
-    st.apply_event(ev("Stop"), 0)
-    st.apply_event(ev("Notification", notification_type="idle_prompt"), 183)
-    for t in range(184, 2000, 60):
-        st.tick(t)
-    assert st.sessions["abc12345-0000"].state == State.WAITING
-
-
-def test_a_stale_idle_session_recovers_on_its_next_event():
-    st = SessionStore(idle_stale_s=600)
-    st.apply_event(ev("Stop"), 0)
-    st.tick(601)
-    st.apply_event(ev("UserPromptSubmit"), 700)
-    assert st.sessions["abc12345-0000"].state == State.WORKING
-
-    st.apply_event(ev("Stop"), 800)
-    st.tick(1401)
-    # A late idle_prompt still raises the alarm from STALE.
-    st.apply_event(ev("Notification", notification_type="idle_prompt"), 1500)
-    assert st.sessions["abc12345-0000"].state == State.NEEDS_INPUT
 
 
 # ---- /health ---------------------------------------------------------------
@@ -935,6 +994,12 @@ def test_look_clears_when_the_session_picks_up_again():
         st.apply_event(ev(name, **extra), 20)
         s = st.sessions["abc12345-0000"]
         assert s.state in (State.WORKING, State.IDLE), name
+        st.tick(80)
+        assert s.state not in (State.NEEDS_INPUT, State.NEEDS_HELD), name
+        if name == "Stop":
+            # A fresh turn end starts a fresh idle wait, which goes red on its
+            # own after idle_prompt_s; that is not the look timer firing.
+            continue
         st.tick(1000)
         assert s.state not in (State.NEEDS_INPUT, State.NEEDS_HELD), name
 

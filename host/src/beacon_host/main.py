@@ -160,6 +160,7 @@ def run(cfg: Config, dry_run: bool = False, capture_path: str | None = None,
 
     store = SessionStore(
         stale_after_s=cfg.stale_after_s,
+        idle_prompt_s=cfg.idle_prompt_s,
         idle_stale_s=cfg.idle_stale_s,
         need_pulse_s=cfg.need_pulse_s,
         need_red_s=cfg.need_red_s,

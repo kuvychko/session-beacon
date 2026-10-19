@@ -129,14 +129,13 @@ stateDiagram-v2
     WORKING --> WORKING: Stop (a subagent still running)
     WORKING --> IDLE: SubagentStop (the last one, turn already over)
     WORKING --> IDLE: the background count expires, turn already over
-    IDLE --> NEEDS_INPUT: idle_prompt, fresh or released from hold, nothing untracked listed
-    IDLE --> NEEDS_LOOK: idle_prompt, fresh or released from hold, untracked work listed
+    IDLE --> NEEDS_INPUT: idle_prompt (real, released from hold, or idle_prompt_s after entering IDLE), nothing untracked listed
+    IDLE --> NEEDS_LOOK: idle_prompt (real, released from hold, or idle_prompt_s after entering IDLE), untracked work listed
     NEEDS_LOOK --> NEEDS_INPUT: after look_s, or a direct ask
     NEEDS_LOOK --> WORKING: PostToolUse / PostToolBatch / UserPromptSubmit
     NEEDS_LOOK --> IDLE: Stop
     WORKING --> ERROR: StopFailure
     WORKING --> STALE: no event for stale_after_s
-    IDLE --> STALE: no event for idle_stale_s
     STARTING --> STALE: no event for idle_stale_s
     STALE --> WORKING: PostToolUse / UserPromptSubmit
     ERROR --> WORKING: UserPromptSubmit
@@ -170,8 +169,8 @@ State semantics:
 | `WAITING` | Same thing, over ten minutes in | amber |
 | `NEEDS_LOOK` | Claude has gone idle, but a workflow, a background shell or similar is still running. Joins `NEEDS_INPUT` after `look_s` (default 300 s) | cyan |
 | `ERROR` | The turn ended on an API error such as a rate limit or an overload | magenta |
-| `IDLE` | Claude finished its turn, waiting for the next prompt | green |
-| `STALE` | Expected to hear from the session and did not: `WORKING` with no event for `stale_after_s` (default 300 s), or `IDLE`/`STARTING` with none for `idle_stale_s` (default 600 s) | amber |
+| `IDLE` | Claude finished its turn, waiting for the next prompt. Joins `NEEDS_INPUT` (or `NEEDS_LOOK`) after `idle_prompt_s` (default 60 s) | green |
+| `STALE` | Expected to hear from the session and did not: `WORKING` with no event for `stale_after_s` (default 300 s), or `STARTING` with none for `idle_stale_s` (default 600 s) | amber |
 | `ENDED` | Session closed; kept on screen briefly, then dropped | dim grey |
 
 `Stop` means the turn ended, not that a human is needed: it carries `background_tasks`, and a turn that ends with a subagent still running stays `WORKING`. Calling it `IDLE` let the next `idle_prompt` paint a red row with nothing to act on. See [claude-code-integration.md](claude-code-integration.md#hook-events-we-register).
@@ -221,23 +220,28 @@ window it lands on no longer matters and nothing depends on a second one arrivin
 
 `STALE` catches crashed or killed VS Code windows that never sent `SessionEnd`. `ENDED` sessions are dropped after `ended_grace_s` (default 30 s).
 
-**`STALE` is reachable from `IDLE` and `STARTING` too.** It used to fire only from
-`WORKING`, so a window killed after its turn had ended sat green, age climbing, with
-nothing short of the 24-hour ghost cutoff to remove it. A green row lies about
-liveness more convincingly than any other, because green is exactly what a parked
-live session looks like. What separates the two is the `idle_prompt`: a live session
-sends one a few minutes after its turn ends (183 s in the capture), and that takes
-it off `IDLE`. A row still `IDLE` with no event of any kind for `idle_stale_s`
-therefore has nothing left to send one. The timer runs from `last_event`, so an
-informational notification counts as a sign of life.
+**A finished turn goes red without waiting for `idle_prompt`.** That notification
+used to be the only way off `IDLE`: a live session sent one a minute or a few after
+its turn ended (183 s in the old capture). Claude Code 2.1.303 sent none at all,
+across three turns left idle for one to seven minutes, while every other hook still
+arrived, so every session waiting on you stayed green. A row that has been `IDLE` for
+`idle_prompt_s` (60 s, Claude Code's own threshold) is now treated exactly as if one
+had arrived, through the same check, so untracked work still softens it to `look`.
+On a build that does send one, whichever lands second finds the row already on the
+ladder and changes nothing.
 
-It lands on `STALE` rather than a new state because `STALE` already means "expected
-to hear from this session and did not", which is the claim here too, and because a
-wrong guess costs almost nothing: a live parked session reaches amber through the
-ladder about ten minutes after its `idle_prompt`, and the next event of any kind,
-including a late `idle_prompt`, moves the row on. `STARTING` is included on the same
-terms; a session opened and closed before its first prompt otherwise sat grey for a
-day.
+The timer runs from entering `IDLE` (`state_since`), never from `last_event`. On
+2.1.303 every `Stop` is followed, from a few seconds to three minutes later, by a
+`SubagentStop` from a hidden post-turn fork; timed from the last event, that would
+push the alarm back by up to three minutes, every turn.
+
+**`STALE` is reachable from `STARTING` too.** It used to fire only from `WORKING`,
+so a session opened and closed before its first prompt sat grey for a day. A
+`STARTING` row with no event for `idle_stale_s` goes `STALE`, which already means
+"expected to hear from this session and did not", and the next event of any kind
+moves it on. `IDLE` used to share this timer, for a window killed after its turn;
+it now leaves `IDLE` at `idle_prompt_s` anyway, and the process check ends a killed
+session outright.
 
 **A killed session ends when its process does.** Closing a window or ending the
 process sends no `SessionEnd`, so a killed session went `stale` or rode the ladder

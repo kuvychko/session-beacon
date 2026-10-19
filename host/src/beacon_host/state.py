@@ -118,13 +118,20 @@ class Session:
 @dataclass
 class SessionStore:
     stale_after_s: float = 300.0
-    # How long an IDLE or STARTING session may go without any event before it
-    # too is called STALE. A live session that has finished its turn is not
-    # silent for long: Claude Code sends an `idle_prompt` once it has waited a
-    # while (one was captured 183 s after the Stop), and that takes the row off
-    # IDLE. Silence well past that means nothing is left to send one -- a window
-    # closed without SessionEnd, which otherwise sat green, age climbing, until
-    # the day-long ghost cutoff.
+    # How long a session may sit IDLE before it is treated as if its
+    # `idle_prompt` had arrived. Claude Code 2.1.303 sent none at all, across
+    # three turns idle for up to seven minutes, and that notification was the
+    # only way an IDLE row ever went red. 60 s is Claude Code's own threshold,
+    # so on a build that still sends one the two land together and the second
+    # is a no-op. Measured from state_since, never last_event: every Stop on
+    # that build is followed by a SubagentStop from a hidden post-turn fork,
+    # up to three minutes later, which would otherwise postpone it.
+    idle_prompt_s: float = 60.0
+    # How long a STARTING session may go without any event before it is called
+    # STALE: a window opened and closed before its first prompt otherwise sat
+    # grey for a day. IDLE used to share this timer, but it now always leaves
+    # at idle_prompt_s, and a session killed after its turn is ended by the
+    # process check instead.
     idle_stale_s: float = 600.0
     # How long a session that wants a human pulses, and how long it stays red at
     # all. Both are measured from when it entered the attention family, so they
@@ -470,13 +477,16 @@ class SessionStore:
                 # Same reasoning as above for a turn that ended and then went
                 # quiet without the count ever being retired.
                 s.set_state(State.IDLE if s.turn_over else State.STALE, now)
-            elif (s.state in (State.IDLE, State.STARTING)
+            elif s.state == State.IDLE and now - s.state_since > self.idle_prompt_s:
+                # The idle_prompt Claude Code no longer reliably sends. Through
+                # the same severity check as a real one, so untracked work still
+                # softens it to NEEDS_LOOK, and a real one arriving afterwards
+                # finds the row already on the ladder and leaves it there.
+                self._idle_prompt(s, now, "")
+            elif (s.state == State.STARTING
                   and now - s.last_event > self.idle_stale_s):
-                # The idle_prompt a live session sends never came. STALE, not a
-                # state of its own, because it already means "expected to hear
-                # from this session and did not". A wrong guess is cheap: amber
-                # is what a live parked row reaches anyway, via the ladder, only
-                # a few minutes later, and the next event of any kind fixes it.
+                # Expected to hear from this session and did not. STALE, not a
+                # state of its own, and the next event of any kind fixes it.
                 s.set_state(State.STALE, now)
             elif s.state == State.NEEDS_LOOK and now - s.state_since > self.look_s:
                 # The safety valve. Nothing reports that a workflow ended, so a

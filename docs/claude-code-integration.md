@@ -94,6 +94,8 @@ The documented `notification_type` values include far more than attention prompt
 
 The rest are informational and only refresh the activity timer: `auth_success`, `elicitation_complete`, `elicitation_response`, `agent_completed`, and the `quota_auto_resume_*` family. `idle_prompt` fires after Claude has been waiting a while, which catches the case where you were asked a question and did not notice.
 
+**`idle_prompt` is no longer load-bearing.** Claude Code 2.1.303 sent none after any of three finished turns, left idle for up to seven minutes, with the hook registered and every other event arriving. The beacon now treats a row that has been `IDLE` for `idle_prompt_s` (60 s) as if one had arrived; see [the state machine](architecture.md#session-state-machine). The same build follows every `Stop` with a `SubagentStop` from a hidden post-turn fork: it carries an `agent_id`, an empty `agent_type` and an empty `background_tasks`, emits no tool events and leaves no transcript. It changes no count, but it lands up to three minutes after the `Stop`, which is why the idle timer runs from the `Stop` and not from the last event.
+
 **`Stop` does not always mean you are up.** It carries `background_tasks`, and a
 turn that ends with a subagent still running has handed nothing back to a human.
 Observed shape:

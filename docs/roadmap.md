@@ -67,6 +67,7 @@ each is guarded by a test, a fixture or a rule in `CLAUDE.md`.
 | 09-18 | A window closed after its turn stayed green for a day | Only `WORKING` had a staleness timer | `IDLE` with no event for `idle_stale_s` (10 min) goes stale |
 | 09-18 | A daemon restart after flashing silently did nothing | A daemon started by hand was invisible to the Scheduled Task | `scripts/restart-daemon.ps1` is the only way to restart it, and `/health` reports the pid |
 | 09-18 | No heartbeat for five hours while the board rendered every snapshot, and `txWatchdog()` never fired | It trusted `hostAttached()`, which read true over a FIFO that never drained, or kept flickering back to true | The watchdog trusts bytes written instead. Each cure records `wcause` and `wflip`, and `stall` tests the new path. Firmware 0.2.2 ([details](architecture.md#a-silent-board-is-not-a-frozen-one)) |
+| 10-19 | After upgrading Claude Code, sessions waiting on you after a finished turn stayed green | 2.1.303 sent no `idle_prompt`, the only way off `IDLE` | A row `IDLE` for `idle_prompt_s` (60 s) is treated as if one had arrived |
 
 ## How we got here
 
@@ -155,6 +156,6 @@ Settled since the last revision:
   [the RP2040-Zero edition](#the-rp2040-zero-edition).
 - The statusline carries the context percentage directly.
 - Hooks run fine through the `curl` command lines on Windows.
-- `idle_nag_s` was never needed. Claude Code's own `idle_prompt` arrives a few minutes
-  into an idle wait and climbs the attention ladder, and `idle_stale_s` handles a window
-  that was closed instead.
+- `idle_nag_s` turned out to be needed after all, as `idle_prompt_s`. Claude Code's own
+  `idle_prompt` used to arrive a few minutes into an idle wait; 2.1.303 sent none, so a
+  row `IDLE` for 60 s now climbs the ladder on its own.

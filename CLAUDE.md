@@ -129,6 +129,12 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   a session for good, which is the monitor bug again.
 - Labels longer than 16 characters are elided in the middle by
   `elide_label()`, not cut at the end. Clones differ only in their suffix.
+- An `IDLE` row joins the ladder after `idle_prompt_s` (60 s) whether or not an
+  `idle_prompt` arrives: Claude Code 2.1.303 sent none, and every waiting session
+  stayed green. Do not remove the timer because the notification exists. It runs
+  from `state_since`, never `last_event`: that build follows every `Stop` with a
+  `SubagentStop` from a hidden post-turn fork, up to three minutes later, which
+  would postpone it.
 - A held `idle_prompt` is remembered on the session, never dropped. Claude Code
   sent exactly one for the idle period that turned this up, so dropping it meant
   the row never went red. `tick()` releases it when the count retires.

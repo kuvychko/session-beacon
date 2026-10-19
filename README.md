@@ -198,10 +198,10 @@ dropped 30 seconds later.
 Green and red both mean Claude is waiting on you. The difference is whether
 anything has said so. A finished turn (`Stop`) is green, because it is not
 urgent yet. A row turns red when Claude Code says it is blocked: straight away
-for a permission prompt or a dialog, or later through its `idle_prompt`
-notification once a green row has gone unanswered. The beacon keeps no idle
-timer of its own for red. It turns red only when Claude Code sends that
-notification.
+for a permission prompt or a dialog, or a minute after a green row has gone
+unanswered. That second path used to wait for Claude Code's `idle_prompt`
+notification, but 2.1.303 stopped sending it, so the beacon now keeps its own
+60-second timer and treats a real `idle_prompt` as the same signal.
 
 It does notice when that notification never comes. A live session sends it a
 few minutes into the wait, so a green row that has heard nothing at all for 10
