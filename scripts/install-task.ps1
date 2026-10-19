@@ -6,7 +6,8 @@
     Creates a Scheduled Task that launches the daemon with pythonw.exe, so it
     runs with no console window. Logon-triggered rather than a Windows service:
     the daemon only matters while you are logged in, and a task is far easier
-    to inspect and remove than a service.
+    to inspect and remove than a service. A second trigger repeats every 5
+    minutes and relaunches the daemon if anything killed it.
 
 .EXAMPLE
     ./scripts/install-task.ps1
@@ -48,18 +49,30 @@ $action = New-ScheduledTaskAction -Execute $pythonw `
     -Argument "-m beacon_host.main --log-file `"$logFile`"" `
     -WorkingDirectory $hostDir
 
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
-# Restart if it dies, and never let Windows stop it for running too long.
+# Relaunch within 5 minutes whatever killed it. At logon fires once per logon,
+# and a restart that Windows cancels after it has already terminated us (an app
+# blocking shutdown) leaves the user logged on with no daemon. -RestartCount
+# does not cover that: it retries a failure to launch, and a process that is
+# killed later is logged as a successful completion. No duration means the
+# repetition never ends. The task runs only while the user is logged on.
+$watch = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes 5)
+
+# IgnoreNew makes every repeat a no-op while the daemon runs. A daemon started
+# outside the task is not an instance, so a repeat launches a copy that loses
+# the port bind and logs the PID holding it. Never let Windows stop it for
+# running too long. StartWhenAvailable fires a repeat missed during sleep.
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable `
+    -MultipleInstances IgnoreNew
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($logon, $watch) `
     -Settings $settings -Description "Session Beacon host daemon" -Force | Out-Null
 
-Write-Host "Registered '$TaskName' to start at logon."
+Write-Host "Registered '$TaskName' to start at logon and relaunch within 5 minutes if it dies."
 Write-Host "  python : $pythonw"
 Write-Host "  logs   : $logFile"
 Write-Host ""

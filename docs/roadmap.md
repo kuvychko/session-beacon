@@ -67,6 +67,7 @@ each is guarded by a test, a fixture or a rule in `CLAUDE.md`.
 | 09-18 | A window closed after its turn stayed green for a day | Only `WORKING` had a staleness timer | `IDLE` with no event for `idle_stale_s` (10 min) goes stale |
 | 09-18 | A daemon restart after flashing silently did nothing | A daemon started by hand was invisible to the Scheduled Task | `scripts/restart-daemon.ps1` is the only way to restart it, and `/health` reports the pid |
 | 09-18 | No heartbeat for five hours while the board rendered every snapshot, and `txWatchdog()` never fired | It trusted `hostAttached()`, which read true over a FIFO that never drained, or kept flickering back to true | The watchdog trusts bytes written instead. Each cure records `wcause` and `wflip`, and `stall` tests the new path. Firmware 0.2.2 ([details](architecture.md#a-silent-board-is-not-a-frozen-one)) |
+| 10-05 | The beacon stayed blank after a restart that never happened | An app blocked the restart after Windows had killed the daemon; at logon never fired again, and `RestartCount` only retries a failure to launch | A second trigger relaunches the daemon every 5 minutes if it is down. `-StopOnly` disables the task so it cannot take the COM port mid-flash |
 | 10-19 | After upgrading Claude Code, sessions waiting on you after a finished turn stayed green | 2.1.303 sent no `idle_prompt`, the only way off `IDLE` | A row `IDLE` for `idle_prompt_s` (60 s) is treated as if one had arrived |
 
 ## How we got here

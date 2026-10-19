@@ -217,7 +217,10 @@ Anything that needs the COM port or the HTTP port to itself -- flashing, or
 running the daemon in the foreground -- goes between
 `./scripts/restart-daemon.ps1 -StopOnly` and `./scripts/restart-daemon.ps1`.
 Two daemons do not share a port, so a second one exits, and its log line names
-the PID holding it.
+the PID holding it. `-StopOnly` disables the task, because its 5-minute trigger
+would otherwise relaunch the daemon onto the COM port mid-flash; the normal run
+enables it again. Do not drop that trigger: at logon fires once per logon, and
+`RestartCount` does not retry a daemon that was killed.
 
 Scripts look tasks up with `schtasks.exe`, never `Get-ScheduledTask`. On this
 machine the cmdlet fails for every task because some unrelated task's XML is

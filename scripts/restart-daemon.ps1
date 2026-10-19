@@ -20,6 +20,8 @@
     -StopOnly does steps 1 to 3 and leaves the daemon down, for work that needs
     the COM port or the HTTP port to itself: flashing firmware, or running the
     daemon in the foreground. Run the script again without it afterwards.
+    It also disables the task, whose 5-minute trigger would otherwise relaunch
+    the daemon onto the COM port mid-flash, and a normal run enables it again.
 
 .EXAMPLE
     ./scripts/restart-daemon.ps1
@@ -57,6 +59,14 @@ if (-not $haveTask -and -not $StopOnly) {
 }
 
 # ---- 1. End the task's run --------------------------------------------------
+# Disable first under -StopOnly, so the repeating trigger cannot start a fresh
+# daemon between here and the work that needs the ports.
+if ($haveTask -and $StopOnly) {
+    if ((Invoke-Schtasks /Change /TN $TaskName /DISABLE) -ne 0) {
+        Fail "schtasks /Change /TN $TaskName /DISABLE failed."
+    }
+    Write-Host "Disabled the '$TaskName' task until this script runs again."
+}
 $before = Get-BeaconHealth -Port $Port
 if ($haveTask -and (Get-BeaconTaskStatus -TaskName $TaskName) -eq "Running") {
     [void](Invoke-Schtasks /End /TN $TaskName)
@@ -94,11 +104,15 @@ if (-not (Test-PortFree)) {
 
 if ($StopOnly) {
     Write-Host "Daemon stopped; COM port and port $Port are free." -ForegroundColor Green
-    Write-Host "Start it again with: ./scripts/restart-daemon.ps1"
+    Write-Host "Start it again with: ./scripts/restart-daemon.ps1 (the task stays disabled until then)"
     exit 0
 }
 
 # ---- 4. Start the task ------------------------------------------------------
+# Always enable: a previous -StopOnly left it disabled, and /Run refuses that.
+if ((Invoke-Schtasks /Change /TN $TaskName /ENABLE) -ne 0) {
+    Fail "schtasks /Change /TN $TaskName /ENABLE failed."
+}
 $started = Get-Date
 if ((Invoke-Schtasks /Run /TN $TaskName) -ne 0) {
     Fail "schtasks /Run /TN $TaskName failed."

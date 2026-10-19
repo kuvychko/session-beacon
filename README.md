@@ -354,7 +354,9 @@ Use that script for every restart, and never start the daemon with
 the next restart through the task quietly fails. The script stops every
 beacon-host process however it was started, and fails unless a fresh daemon
 answers `/health`. Stop it the same way before flashing firmware, because the
-daemon holds the COM port.
+daemon holds the COM port. `-StopOnly` also disables the task, which would
+otherwise relaunch the daemon within 5 minutes, and the next normal run enables
+it again.
 
 ### 3. Terminal 1: start the daemon and leave it running
 
@@ -397,6 +399,12 @@ logon instead, with no console:
 ./scripts/install-task.ps1           # from the repository root
 ./scripts/restart-daemon.ps1         # starts it now, and confirms it answers
 ```
+
+The task also relaunches the daemon within 5 minutes if anything kills it. That
+covers a blank beacon after a restart where the PC never actually rebooted: an
+app held up the shutdown, but Windows had already ended the daemon.
+`./scripts/restart-daemon.ps1` brings it back on the spot. An install from
+before this change has only the logon trigger; run `install-task.ps1` again.
 
 To undo all of it, including the hooks, the scheduled task, the running daemon
 and the logs:
