@@ -58,6 +58,22 @@ if (-not $haveTask -and -not $StopOnly) {
     Fail "no Scheduled Task named '$TaskName'. Run ./scripts/install-task.ps1 first, or run the daemon in the foreground: cd host; uv run beacon-host"
 }
 
+# A task registered by an older install-task.ps1 keeps its old triggers. Say so
+# here, because this script is what people run when the beacon has gone blank,
+# and a task with only the logon trigger is why it went blank. Warn, never fail.
+if ($haveTask -and -not $StopOnly) {
+    $triggers = Get-BeaconTaskTriggers -TaskName $TaskName
+    if ($null -ne $triggers) {
+        if ($triggers -notcontains "TimeTrigger") {
+            Write-Host ("WARNING: the '$TaskName' task predates the 5-minute relaunch trigger, so the " +
+                "daemon stays down after anything kills it until your next logon. " +
+                "Run ./scripts/install-task.ps1 again.") -ForegroundColor Yellow
+        } elseif ($triggers -notcontains "SessionStateChangeTrigger") {
+            Write-Host "Note: the '$TaskName' task has no unlock trigger; re-run ./scripts/install-task.ps1 to relaunch on unlock."
+        }
+    }
+}
+
 # ---- 1. End the task's run --------------------------------------------------
 # Disable first under -StopOnly, so the repeating trigger cannot start a fresh
 # daemon between here and the work that needs the ports.

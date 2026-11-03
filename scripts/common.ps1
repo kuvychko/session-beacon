@@ -49,6 +49,28 @@ function Get-BeaconTaskStatus {
     }
 }
 
+function Get-BeaconTaskTriggers {
+    <# The task's trigger element names from its XML ("LogonTrigger",
+       "TimeTrigger", "SessionStateChangeTrigger"...), or $null if the task
+       cannot be read. Lets callers spot a task registered by an older
+       install-task.ps1, which keeps its old triggers until re-run. #>
+    param([string]$TaskName = "SessionBeacon")
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $raw = & schtasks.exe /Query /TN $TaskName /XML 2> $null
+        if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+        $xml = [xml]($raw -join "`n")
+        return @($xml.Task.Triggers.ChildNodes |
+            Where-Object { $_.NodeType -eq "Element" } |
+            ForEach-Object { $_.LocalName })
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $old
+    }
+}
+
 function Get-BeaconDaemonProcess {
     <# Every beacon-host process, however it was started: the Scheduled Task's
        pythonw.exe (a venv launcher plus the interpreter it spawns), a

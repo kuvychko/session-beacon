@@ -7,7 +7,8 @@
     runs with no console window. Logon-triggered rather than a Windows service:
     the daemon only matters while you are logged in, and a task is far easier
     to inspect and remove than a service. A second trigger repeats every 5
-    minutes and relaunches the daemon if anything killed it.
+    minutes and relaunches the daemon if anything killed it, and a third does
+    the same the moment the workstation is unlocked.
 
 .EXAMPLE
     ./scripts/install-task.ps1
@@ -60,6 +61,16 @@ $logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $watch = New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes 5)
 
+# And straight away when the user comes back to the machine, rather than up to
+# 5 minutes later. Only a fast path: the repeat above is the one that must stay.
+# New-ScheduledTaskTrigger has no unlock option, hence the CIM class.
+$sessionCls = Get-CimClass -Namespace ROOT\Microsoft\Windows\TaskScheduler `
+    -ClassName MSFT_TaskSessionStateChangeTrigger
+$unlock = New-CimInstance -CimClass $sessionCls -ClientOnly -Property @{
+    StateChange = 8   # TASK_SESSION_UNLOCK
+    UserId      = "$env:USERDOMAIN\$env:USERNAME"
+}
+
 # IgnoreNew makes every repeat a no-op while the daemon runs. A daemon started
 # outside the task is not an instance, so a repeat launches a copy that loses
 # the port bind and logs the PID holding it. Never let Windows stop it for
@@ -69,10 +80,10 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable `
     -MultipleInstances IgnoreNew
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($logon, $watch) `
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($logon, $watch, $unlock) `
     -Settings $settings -Description "Session Beacon host daemon" -Force | Out-Null
 
-Write-Host "Registered '$TaskName' to start at logon and relaunch within 5 minutes if it dies."
+Write-Host "Registered '$TaskName' to start at logon, and to relaunch on unlock or within 5 minutes if it dies."
 Write-Host "  python : $pythonw"
 Write-Host "  logs   : $logFile"
 Write-Host ""

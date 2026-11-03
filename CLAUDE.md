@@ -220,7 +220,9 @@ Two daemons do not share a port, so a second one exits, and its log line names
 the PID holding it. `-StopOnly` disables the task, because its 5-minute trigger
 would otherwise relaunch the daemon onto the COM port mid-flash; the normal run
 enables it again. Do not drop that trigger: at logon fires once per logon, and
-`RestartCount` does not retry a daemon that was killed.
+`RestartCount` does not retry a daemon that was killed. The unlock trigger
+beside it is only a fast path and cannot replace it, since a daemon killed
+while the user is at the desk sees no unlock.
 
 Scripts look tasks up with `schtasks.exe`, never `Get-ScheduledTask`. On this
 machine the cmdlet fails for every task because some unrelated task's XML is

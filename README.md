@@ -400,11 +400,12 @@ logon instead, with no console:
 ./scripts/restart-daemon.ps1         # starts it now, and confirms it answers
 ```
 
-The task also relaunches the daemon within 5 minutes if anything kills it. That
-covers a blank beacon after a restart where the PC never actually rebooted: an
-app held up the shutdown, but Windows had already ended the daemon.
-`./scripts/restart-daemon.ps1` brings it back on the spot. An install from
-before this change has only the logon trigger; run `install-task.ps1` again.
+If anything kills the daemon, the task relaunches it within 5 minutes, or as
+soon as you unlock the workstation. That covers a blank beacon after a restart
+where the PC never actually rebooted: an app held up the shutdown, but Windows
+had already ended the daemon. `./scripts/restart-daemon.ps1` brings it back on
+the spot, and warns if your task was registered by an older `install-task.ps1`
+that lacks these triggers. If it does, run `install-task.ps1` again.
 
 To undo all of it, including the hooks, the scheduled task, the running daemon
 and the logs:
