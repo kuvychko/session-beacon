@@ -180,6 +180,15 @@ docs/                        architecture, hardware, enclosure, protocol, claude
   status line, the logs or the docs -- `beacon stuck: replug` was shown for two
   hours against a beacon whose counters were visibly advancing, which is the
   issue this wording came from.
+- `ensure_open()` returns the hello's result, and callers must not write when it
+  is `False`. A board whose receive side has stopped enumerates and opens, then
+  times out every write; the failed hello closed the port, `ensure_open()` said
+  `True` anyway, and the write that followed hit `None` and crash-looped the
+  daemon for nine hours. Such a board is retried every `REFUSED_RETRY_S`, not
+  `RECONNECT_S`, and reads as `absent` meanwhile. Unlike `silent`, this is the
+  host's own writes failing, so its one warning may suggest replugging if it
+  persists. `main()` logs uncaught exceptions as `crashed` because the task runs
+  under `pythonw`, which drops stderr: the crash loop left only `stopped`.
 - Anything that installs outside the repo must be removable by `scripts/uninstall.ps1`. It stops the daemon, drops the Scheduled Task, strips the hooks and clears the logs, and it must stay idempotent and leave user-authored things alone. `install-hooks.ps1` takes `-SettingsPath` so the round trip can be tested against a throwaway file.
 - Neither install script writes or backs up settings.json when nothing would change, or repeat runs litter the directory with backups.
 

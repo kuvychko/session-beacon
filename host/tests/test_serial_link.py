@@ -208,3 +208,61 @@ def test_poll_joins_a_line_split_across_reads():
     assert link.heartbeat_report(0.2)["up"] == 42
     assert link.poll(20.0) == []
     assert link.device_state(20.0) == SILENT
+
+
+def test_a_board_that_refuses_the_hello_does_not_crash_the_daemon(monkeypatch):
+    """A board whose receive side has stopped still enumerates and opens, but
+    no write reaches it. The hello sent on open timed out, closed the port, and
+    the send that had triggered the open then wrote to None: an AttributeError
+    that killed the daemon within a second of every launch for nine hours."""
+    from beacon_host import serial_link
+
+    class Refusing(_FakeSerial):
+        def write(self, _data):
+            raise serial_link.serial.SerialTimeoutException("Write timeout")
+
+    monkeypatch.setattr(serial_link.serial, "Serial", lambda *a, **k: Refusing([]))
+    link = SerialLink("COM5")
+    assert link.send({"t": "snap"}) is False
+    assert not link.connected
+
+
+def test_a_refusing_board_is_retried_slowly_and_reported_once(monkeypatch, caplog):
+    """Reopening every RECONNECT_S blocked the loop a second at a time and
+    wrote two log lines every two seconds, enough to rotate away the whole log
+    overnight."""
+    from beacon_host import serial_link
+
+    clock = [100.0]
+    opens: list[int] = []
+    accept = [False]
+
+    class Board(_FakeSerial):
+        def write(self, data):
+            if not accept[0]:
+                raise serial_link.serial.SerialTimeoutException("Write timeout")
+            return len(data)
+
+    def open_port(*_a, **_k):
+        opens.append(1)
+        return Board([])
+
+    monkeypatch.setattr(serial_link.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(serial_link.serial, "Serial", open_port)
+    link = SerialLink("COM5")
+    with caplog.at_level(logging.INFO):
+        for _ in range(3):
+            link.send({"t": "snap"})
+            clock[0] += serial_link.RECONNECT_S
+        assert len(opens) == 1          # nothing until REFUSED_RETRY_S is up
+        clock[0] += serial_link.REFUSED_RETRY_S
+        assert link.send({"t": "snap"}) is False
+        assert len(opens) == 2
+        clock[0] += serial_link.REFUSED_RETRY_S
+        accept[0] = True
+        assert link.send({"t": "snap"}) is True
+    msgs = [r.getMessage() for r in caplog.records]
+    assert sum("takes no writes" in m for m in msgs) == 1
+    assert sum("write failed" in m for m in msgs) == 1
+    assert sum("connected to beacon" in m for m in msgs) == 1
+    assert any("taking writes again" in m for m in msgs)

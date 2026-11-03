@@ -42,6 +42,10 @@ RP2040 = (0x2E8A, 0x0003)
 KNOWN_BOARDS = (NANO_ESP32, RP2040)
 BAUD = 115200
 RECONNECT_S = 2.0
+# A board that opens but will not take the hello. Retrying that every
+# RECONNECT_S blocks the loop for the write timeout every other second, toggles
+# DTR on each open, and fills the rotating log with the same two lines.
+REFUSED_RETRY_S = 30.0
 # Five missed heartbeats. Long enough to ride out a slow USB moment, short
 # enough that a board which has stopped answering is reported while someone is
 # still looking.
@@ -177,6 +181,7 @@ class SerialLink:
         self._ser: serial.Serial | None = None
         self._next_try = 0.0
         self._warned = False
+        self._refused = False
         self._rx = bytearray()
         self.health = DeviceHealth()
 
@@ -209,11 +214,27 @@ class SerialLink:
             self._ser = None
             return False
 
-        log.info("connected to beacon on %s", port)
+        log.log(logging.DEBUG if self._refused else logging.INFO,
+                "connected to beacon on %s", port)
         self._warned = False
         self._rx.clear()
         self.health.on_open(port, time.monotonic())
-        self.send({"t": "hello", "v": 1, "host": socket.gethostname()})
+        # A board whose receive side has stopped opens fine and then refuses
+        # this write, which closes the port again. Say so, or the caller writes
+        # to a port that is no longer there.
+        if not self.send({"t": "hello", "v": 1, "host": socket.gethostname()}):
+            self._next_try = time.monotonic() + REFUSED_RETRY_S
+            if not self._refused:
+                log.warning(
+                    "%s opens but takes no writes, so the board is not reading "
+                    "what it is sent; retrying every %ds. Nothing on this side "
+                    "can reset it: if this persists, replug the board.",
+                    port, int(REFUSED_RETRY_S))
+                self._refused = True
+            return False
+        if self._refused:
+            log.info("beacon on %s is taking writes again", port)
+            self._refused = False
         return True
 
     def send(self, msg: dict[str, Any]) -> bool:
@@ -224,7 +245,8 @@ class SerialLink:
             self._ser.write(line.encode())  # type: ignore[union-attr]
             return True
         except (serial.SerialException, OSError) as e:
-            log.warning("write failed, dropping link: %s", e)
+            log.log(logging.DEBUG if self._refused else logging.WARNING,
+                    "write failed, dropping link: %s", e)
             self.close()
             return False
 

@@ -319,8 +319,17 @@ def main() -> None:
     args = parse_args()
     cfg = build_config(args)
     setup_logging(cfg)
-    sys.exit(run(cfg, dry_run=args.dry_run, capture_path=args.capture,
-                 persist_state=not args.no_persist))
+    # Under pythonw, which is how the Scheduled Task runs this, stderr goes
+    # nowhere, so an uncaught exception left only "stopped" in the log and an
+    # exit code of 1 in the task history. A crash loop went unexplained for
+    # nine hours that way.
+    try:
+        code = run(cfg, dry_run=args.dry_run, capture_path=args.capture,
+                   persist_state=not args.no_persist)
+    except Exception:
+        log.exception("crashed")
+        code = 1
+    sys.exit(code)
 
 
 if __name__ == "__main__":
